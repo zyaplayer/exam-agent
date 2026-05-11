@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+venv/
+.venv/
+env/
+
+# 环境变量（包含敏感信息）
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 向量数据库持久化数据
+data/chroma_db/
+
+# Docker
+.docker/
+
+# 操作系统
+.DS_Store
+Thumbs.db

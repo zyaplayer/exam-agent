@@ -1,0 +1,30 @@
+# ============================================
+# 考研伴学 Agent - Python 依赖清单
+# ============================================
+
+# --- Web 框架与服务器 ---
+fastapi>=0.115.0           # 高性能异步 Web 框架
+uvicorn[standard]>=0.30.0  # ASGI 服务器（含 uvloop、httptools 等性能扩展）
+sse-starlette>=2.1.0       # 服务端推送事件（Server-Sent Events），用于流式对话返回
+
+# --- LangChain 生态 ---
+langchain>=0.3.0           # LangChain 核心框架
+langchain-openai>=0.2.0    # OpenAI 兼容接口封装（用于对接 DeepSeek V4 API）
+langchain-chroma>=0.2.0    # ChromaDB 向量库集成
+langchain-community>=0.3.0 # 社区文档加载器（PDF、TXT 等）
+langchain-text-splitters>=0.3.0  # 文本切分器
+langchain-huggingface>=0.1.0  # HuggingFace 嵌入模型集成
+
+# --- 向量数据库 ---
+chromadb>=0.5.0            # 本地向量数据库，持久化存储嵌入向量
+
+# --- AI API 客户端 ---
+openai>=1.50.0             # OpenAI Python SDK（DeepSeek V4 兼容 OpenAI 格式）
+
+# --- 配置与工具 ---
+python-dotenv>=1.0.0       # 从 .env 文件加载环境变量
+pydantic-settings>=2.5.0   # 基于 Pydantic V2 的配置管理
+pypdf>=4.3.0               # PDF 文档解析（用于加载考研历年真题 PDF）
+
+# --- 类型检查（开发辅助，不影响运行时）---
+# typing-extensions 已随 pydantic 自动安装，此处不单独声明
