@@ -5,6 +5,10 @@
 封装了 ChromaDB 的底层细节，上层 Agent 只需调用这里的函数。
 """
 
+import chromadb
+from pathlib import Path
+from typing import List, Optional
+
 from pathlib import Path
 from typing import List, Optional
 
@@ -16,6 +20,14 @@ from app.core.config import settings
 from app.core.llm_manager import get_embeddings
 
 
+
+# ---- ChromaDB 全局单例客户端（避免重复初始化冲突） ----
+import threading
+_chroma_clients: dict = {}
+_chroma_lock = threading.Lock()
+# [注] chromadb 1.5+ 不允许同一目录创建多个不同设置的 PersistentClient，
+#   因此必须全局共享同一个客户端实例。
+
 # ============================================
 # 第一部分：向量库连接
 
@@ -26,6 +38,25 @@ def _get_embedding_function():
     使用本地 HuggingFace 模型，无需 API Key。
     """
     return get_embeddings()
+
+def _get_persistent_client() -> chromadb.PersistentClient:
+    """
+    获取线程安全的 ChromaDB 持久化客户端单例。
+    所有需要直接操作 ChromaDB 的函数都应通过此函数获取客户端。
+    """
+    persist_dir = str(settings.BASE_DIR / settings.CHROMA_PERSIST_DIR.lstrip("./"))
+    Path(persist_dir).mkdir(parents=True, exist_ok=True)
+
+    with _chroma_lock:
+        if persist_dir not in _chroma_clients:
+            _chroma_clients[persist_dir] = chromadb.PersistentClient(
+                path=persist_dir,
+                settings=ChromaSettings(
+                    anonymized_telemetry=False,
+                    is_persistent=True,
+                ),
+            )
+        return _chroma_clients[persist_dir]
 
 
 def get_vector_store(
@@ -41,20 +72,14 @@ def get_vector_store(
     返回:
         langchain_chroma.Chroma 实例，可直接调用 add_documents / similarity_search
     """
-    # 确保持久化目录存在
-    persist_dir = str(settings.BASE_DIR / settings.CHROMA_PERSIST_DIR.lstrip("./"))
-    Path(persist_dir).mkdir(parents=True, exist_ok=True)
+    shared_client = _get_persistent_client()
 
     vector_store = Chroma(
         collection_name=collection_name,
         embedding_function=_get_embedding_function(),
-        persist_directory=persist_dir,
-        # ChromaDB 客户端设置
-        client_settings=ChromaSettings(
-            anonymized_telemetry=False,  # 关闭遥测
-            is_persistent=True,
-        ),
+        client=shared_client,
     )
+
 
     return vector_store
 
@@ -128,16 +153,26 @@ def search_documents(
     if vector_store._collection.count() == 0:
         return []
 
-    results = vector_store.similarity_search(
+    # 使用带分数的检索 API，便于过滤低相关度结果
+    results_with_scores = vector_store.similarity_search_with_score(
         query=query,
         k=k,
     )
 
-    # [缺陷] similarity_search 不支持 score_threshold 过滤（如仅返回 >0.7 的结果），
-    #   可能返回完全不相关的向量。可通过 similarity_search_with_score 获取分数后自行过滤。
-    # [后续扩展] 改用 similarity_search_with_score 并加入阈值过滤。
+    # 按相似度阈值过滤（余弦距离越小越相关，0 = 完全匹配，1 = 完全不相关）
+    threshold = settings.RETRIEVAL_THRESHOLD
+    filtered_docs: List[Document] = []
+    for doc, score in results_with_scores:
+        # [注] ChromaDB 的 similarity_search_with_score 返回的是余弦距离
+        # 距离 = 0 表示完全相同，距离 = 1 表示正交（无关）
+        # 因此 "score <= threshold" 表示只保留距离小于阈值的文档
+        if threshold <= 0.0 or score <= threshold:
+            # 将分数存入 metadata，供后续引用标注使用
+            doc.metadata["relevance_score"] = round(score, 4)
+            filtered_docs.append(doc)
 
-    return results
+    return filtered_docs
+
 
 
 # ============================================
@@ -152,12 +187,10 @@ def list_collections() -> List[str]:
     返回:
         Collection 名称列表
     """
-    import chromadb
-
-    persist_dir = str(settings.BASE_DIR / settings.CHROMA_PERSIST_DIR.lstrip("./"))
-    client = chromadb.PersistentClient(path=persist_dir)
+    client = _get_persistent_client()
     collections = client.list_collections()
     return [col.name for col in collections]
+
 
 
 def delete_collection(collection_name: str) -> bool:
@@ -170,10 +203,9 @@ def delete_collection(collection_name: str) -> bool:
     返回:
         是否成功删除
     """
-    import chromadb
 
-    persist_dir = str(settings.BASE_DIR / settings.CHROMA_PERSIST_DIR.lstrip("./"))
-    client = chromadb.PersistentClient(path=persist_dir)
+    client = _get_persistent_client()
+
 
     try:
         client.delete_collection(collection_name)

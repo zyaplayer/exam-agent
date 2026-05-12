@@ -66,13 +66,7 @@ class IngestResponse(BaseModel):
     message: str = Field(default="文档入库成功", description="状态描述")
 
 
-class HealthResponse(BaseModel):
-    """健康检查响应"""
-    status: str = Field(default="ok", description="服务状态")
-    project: str = Field(default=settings.PROJECT_NAME, description="项目名称")
-    version: str = Field(default=settings.PROJECT_VERSION, description="版本号")
-    # [缺陷] 健康检查未包含模型可用性、ChromaDB 连接状态等深度检查。
-    # [后续扩展] 增加 deep_check 参数，返回各依赖组件的连通性。
+
 
 
 class CollectionListResponse(BaseModel):
@@ -312,14 +306,67 @@ async def get_collections():
 @router.get(
     "/api/health",
     summary="服务健康检查",
-    response_model=HealthResponse,
+    response_model=None,  # 两个响应模型不同，改为 None 手动返回
 )
-async def health_check():
+async def health_check(deep: bool = False):
     """
-    简单的健康检查，返回项目名称和版本。
-    可用于 Docker 容器健康探测或负载均衡健康检查。
+    健康检查。
+    - 浅度检查 (deep=false): 只验证进程存活，适用于负载均衡健康探测。
+    - 深度检查 (deep=true):  验证 DeepSeek API、ChromaDB、嵌入模型是否可用。
     """
-    return HealthResponse()
+    if not deep:
+        return {
+            "status": "ok",
+            "project": settings.PROJECT_NAME,
+            "version": settings.PROJECT_VERSION,
+        }
+
+    # 深度检查：逐一验证依赖组件
+    checks = {
+        "process": "ok",
+        "deepseek_api": "ok",
+        "chromadb": "ok",
+        "embedding_model": "ok",
+    }
+
+    # 1) 检查 DeepSeek API 可达性
+    try:
+        from app.core.llm_manager import get_llm
+        llm = get_llm(streaming=False)
+        # 发送一个极短的测试请求，验证 API Key 有效且端点可达
+        test_response = llm.invoke("ping")
+        if not test_response.content:
+            raise RuntimeError("API 返回为空")
+    except Exception as e:
+        checks["deepseek_api"] = f"error: {str(e)[:100]}"
+
+    # 2) 检查 ChromaDB 连通性
+    try:
+        from app.services.vector_store import list_collections
+        list_collections()
+    except Exception as e:
+        checks["chromadb"] = f"error: {str(e)[:100]}"
+
+    # 3) 检查嵌入模型是否已加载
+    try:
+        from app.core.llm_manager import get_embeddings
+        emb = get_embeddings()
+        # 尝试用一个短文本测试向量化是否正常
+        _ = emb.embed_query("测试文本")
+    except Exception as e:
+        checks["embedding_model"] = f"error: {str(e)[:100]}"
+
+    # 综合状态：所有组件均 ok 才返回 ok
+    all_ok = all(v == "ok" for v in checks.values())
+    overall_status = "ok" if all_ok else "degraded"
+
+    return {
+        "status": overall_status,
+        "project": settings.PROJECT_NAME,
+        "version": settings.PROJECT_VERSION,
+        "checks": checks,
+    }
+
 
 
 # ============================================

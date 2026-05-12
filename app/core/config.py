@@ -68,7 +68,7 @@ class Settings(BaseSettings):
 
     # 按 Markdown 标题切分的层级（例如设为 2 表示按 H2 切分，保留 "章" 的边界）
     # 设为 1 最粗（按 H1 切，整章一个块），设为 3 更细（按 H3 切）
-    MARKDOWN_SPLIT_HEADER_LEVEL: int = 2
+    MARKDOWN_SPLIT_HEADER_LEVEL: int = 3
 
     # 解析器能识别的最大标题层级（防止误将正文中的 # 编号当作标题）
     MARKDOWN_HEADER_MAX_LEVEL: int = 4

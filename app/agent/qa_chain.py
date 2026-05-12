@@ -37,21 +37,28 @@ def _format_retrieved_context(docs: List[Document]) -> str:
         格式化后的上下文字符串。如果 docs 为空，返回占位提示文本。
     """
     if not docs:
-        return "（暂无相关参考知识片段，请根据您的通识知识回答）"
-        # [缺陷] 当知识库为空时，LLM 会依赖自身训练数据生成答案，
-        #   可能产生幻觉或偏离教材表述。应在前端提示用户先上传资料。
+        return ""
 
     parts: List[str] = []
     for i, doc in enumerate(docs, start=1):
         source = doc.metadata.get("source", "未知来源")
         page = doc.metadata.get("page", "")
-        # [缺陷] metadata 中可能有更多有用字段（如 chapter, subject, year），
-        #   当前只用了 source 和 page，信息利用率低。
+        # 提取 Markdown 标题层级信息（Header_1=章, Header_2=节, Header_3=小节）
+        header_parts = []
+        for level in range(1, settings.MARKDOWN_HEADER_MAX_LEVEL + 1):
+            header_text = doc.metadata.get(f"Header_{level}", "")
+            if header_text:
+                header_parts.append(header_text)
+        hierarchy = " → ".join(header_parts) if header_parts else ""
+
         location = f"来源: {source}"
         if page:
             location += f", 第{page}页"
+        if hierarchy:
+            location += f", 章节: {hierarchy}"
 
         parts.append(f"【片段 {i}】（{location}）\n{doc.page_content}")
+
 
     return "\n\n".join(parts)
 
@@ -87,23 +94,33 @@ def ask_question(
     if k is None:
         k = settings.RETRIEVAL_K
 
-    # 步骤1: 向量检索
+        # 步骤1: 向量检索
     retrieved_docs = search_documents(
         query=question,
         collection_name=collection_name,
         k=k,
     )
 
-    # 步骤2: 构建上下文
+    # 步骤2: 知识库为空时直接拒绝回答，不调用 LLM
+    if not retrieved_docs:
+        return (
+            "当前知识库中暂无相关内容，无法回答你的问题。\n\n"
+            "建议：\n"
+            "1. 先上传相关教材或笔记到知识库\n"
+            "2. 或者换一个知识库中已有资料的问题试试"
+        )
+
+    # 步骤3: 构建上下文
     context = _format_retrieved_context(retrieved_docs)
 
-    # 步骤3: 组装 Prompt
+
+    # 步骤4: 组装 Prompt
     user_prompt = QA_USER_PROMPT_TEMPLATE.format(
         question=question,
         context=context,
     )
 
-    # 步骤4: 调用 LLM
+    # 步骤5: 调用 LLM
     llm = get_llm(provider="deepseek", temperature=temperature, streaming=False)
 
     # LangChain ChatOpenAI 的消息格式
@@ -159,23 +176,36 @@ async def ask_question_stream(
     if k is None:
         k = settings.RETRIEVAL_K
 
-    # 步骤1: 向量检索（同步操作，但耗时较短）
+        # 步骤1: 向量检索
     retrieved_docs = search_documents(
         query=question,
         collection_name=collection_name,
         k=k,
     )
 
-    # 步骤2: 构建上下文
+    # 步骤2: 知识库为空时直接拒绝回答，不调用 LLM
+    if not retrieved_docs:
+        message = (
+            "当前知识库中暂无相关内容，无法回答你的问题。\n\n"
+            "建议：\n"
+            "1. 先上传相关教材或笔记到知识库\n"
+            "2. 或者换一个知识库中已有资料的问题试试"
+        )
+        for char in message:
+            yield char
+        return
+
+    # 步骤3: 构建上下文
     context = _format_retrieved_context(retrieved_docs)
 
-    # 步骤3: 组装 Prompt
+
+    # 步骤4: 组装 Prompt
     user_prompt = QA_USER_PROMPT_TEMPLATE.format(
         question=question,
         context=context,
     )
 
-    # 步骤4: 调用流式 LLM
+    # 步骤5: 调用流式 LLM
     llm = get_llm(provider="deepseek", temperature=temperature, streaming=True)
 
     from langchain_core.messages import SystemMessage, HumanMessage
