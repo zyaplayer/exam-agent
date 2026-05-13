@@ -2,7 +2,7 @@
 考研伴学 Agent - API 路由接口层
 =================================
 定义所有对外 HTTP 接口。
-MVP 范围：对话（SSE 流式）、文档上传入库、Collection 列表、健康检查。
+/chat 接口接入三条真实链路: QA / Quiz / Planner。
 """
 
 import os
@@ -10,13 +10,21 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.agent.router import classify_intent, Intent
 from app.agent.qa_chain import ask_question_stream
+from app.agent.quiz_generator import (
+    generate_simple_quiz_stream,
+    generate_exam_quiz_stream,
+    get_all_bindings,
+    create_binding,
+    delete_binding,
+)
+from app.agent.planner_chain import generate_plan_stream
 from app.services.vector_store import ingest_document, list_collections
 
 
@@ -25,9 +33,6 @@ from app.services.vector_store import ingest_document, list_collections
 # ============================================
 
 router = APIRouter()
-
-# [缺陷] 所有路由的前缀硬编码。如果后续要加版本号（如 /api/v1/chat），
-#   需要逐个修改。应在 router 初始化时统一设置 prefix="/api/v1"。
 
 
 # ============================================
@@ -41,15 +46,12 @@ class ChatRequest(BaseModel):
         min_length=1,
         max_length=5000,
         description="学生的提问内容",
-        examples=["什么是拉格朗日中值定理？"],
     )
     collection_name: str = Field(
         default="default",
         description="要检索的知识库 Collection 名称",
-        examples=["default", "线性代数", "考研英语"],
     )
     # [缺陷] 缺少 conversation_id 字段，无法关联多轮对话历史。
-    # [后续扩展] 新增 conversation_id: Optional[str] 字段。
 
 
 class ChatErrorResponse(BaseModel):
@@ -60,169 +62,171 @@ class ChatErrorResponse(BaseModel):
 
 class IngestResponse(BaseModel):
     """文档入库成功响应"""
-    filename: str = Field(..., description="原始文件名")
-    collection_name: str = Field(..., description="目标 Collection")
-    chunk_count: int = Field(..., description="切分并入库的文档块数量")
-    message: str = Field(default="文档入库成功", description="状态描述")
-
-
-
+    filename: str
+    collection_name: str
+    chunk_count: int
+    message: str = "文档入库成功"
 
 
 class CollectionListResponse(BaseModel):
     """Collection 列表响应"""
-    collections: list[str] = Field(..., description="Collection 名称列表")
-    count: int = Field(..., description="Collection 总数")
+    collections: list[str]
+    count: int
+
+
+class BindingRequest(BaseModel):
+    """创建绑定请求"""
+    textbook_collections: list[str] = Field(..., min_length=1)
+    exam_collections: list[str] = Field(..., min_length=1)
+    label: str = ""
+
+
+class BindingResponse(BaseModel):
+    """绑定记录"""
+    id: str
+    textbook_collections: list[str]
+    exam_collections: list[str]
+    label: str
 
 
 # ============================================
-# 占位消息（非 QA 意图的兜底回复）
+# 辅助：SSE 包装器
 # ============================================
-
-_PLACEHOLDER_MESSAGES: dict[Intent, str] = {
-    Intent.QUIZ: (
-        "做题练习功能正在全力开发中，预计下个版本上线！"
-        "当前你可以：\n"
-        "1. 先上传历年真题 PDF 到知识库\n"
-        "2. 通过问答模式让我逐题讲解\n"
-        "3. 把不会的题目直接发给我，我来分析"
-    ),
-    Intent.PLANNER: (
-        "学习规划功能正在开发中，敬请期待！"
-        "当前你可以：\n"
-        "1. 向我提问任何考研知识点\n"
-        "2. 上传教材和笔记，我会基于你的资料作答\n"
-        "3. 让我帮你分析某个概念或定理"
-    ),
-}
-
-# [缺陷] 占位消息写死在代码中，无法热更新。
-# [后续扩展] 可移到 prompts.py 或配置文件中统一管理。
-
-
-# ============================================
-# 辅助函数
-# ============================================
-
-async def _stream_placeholder(intent: Intent):
-    """
-    将占位消息模拟为流式输出。
-    保持与正常问答一致的 SSE 格式，前端无需区分。
-    """
-    message = _PLACEHOLDER_MESSAGES.get(intent, "该功能暂未开放，请尝试其他操作。")
-    # 按字符逐字输出，模拟打字效果
-    # [缺陷] 中文逐字输出与正常 LLM token 流式粒度不一致（token != 字符），
-    #   前端打字机动画可能节奏不同。
-    for char in message:
-        yield char
-    # [缺陷] 简单的 sleep 模拟打字延迟。asyncio.sleep 需要 import。
-
 
 async def _sse_wrapper(generator):
     """
     将异步生成器包装为标准 SSE（Server-Sent Events）格式。
 
-    每输出格式：
+    每输出格式:
         data: {token}\n\n
 
     以 [DONE] 标记流结束。
     """
     async for token in generator:
-        # SSE 格式：data: <内容>\n\n
         yield f"data: {token}\n\n"
     yield "data: [DONE]\n\n"
 
 
 # ============================================
-# 一、对话接口（核心）
+# 一、对话接口（核心 — 三条链路）
 # ============================================
 
 @router.post(
     "/api/chat",
     summary="考研伴学对话接口（SSE 流式）",
-    description="接收学生问题，自动识别意图并返回流式回答。",
-    response_description="SSE 文本流，每个 token 作为 data 事件推送",
+    description="接收学生问题，自动识别意图并分发给 QA / Quiz / Planner 链路。",
 )
 async def chat(req: ChatRequest):
     """
     核心对话接口。
 
-    流程:
-        1. 接收用户消息
-        2. 意图识别（router.classify_intent）
-        3. 根据意图分发:
-           - QA      → qa_chain.ask_question_stream（RAG + LLM 流式生成）
-           - QUIZ    → 占位消息（做题功能开发中）
-           - PLANNER → 占位消息（规划功能开发中）
-        4. 以 SSE 格式流式返回
+    意图分发:
+      - QA       → qa_chain.ask_question_stream（RAG 知识问答）
+      - QUIZ     → quiz_generator.generate_simple_quiz_stream（做题练习）
+      - PLANNER  → planner_chain.generate_plan_stream（学习规划）
     """
-    # 步骤1: 意图识别
+    # 步骤1: 意图识别（混合方案：规则 + LLM）
     route_result = classify_intent(req.message)
 
     # 步骤2: 根据意图选择处理链路
     try:
         if route_result.intent == Intent.QA:
-            # 核心链路：RAG 流式问答
             token_generator = ask_question_stream(
                 question=req.message,
                 collection_name=req.collection_name,
             )
+        elif route_result.intent == Intent.QUIZ:
+            # 简单出题模式（试卷模式需单独调用 /api/quiz/exam）
+            token_generator = generate_simple_quiz_stream(
+                message=req.message,
+                collection_name=req.collection_name,
+            )
+        elif route_result.intent == Intent.PLANNER:
+            token_generator = generate_plan_stream(
+                message=req.message,
+            )
         else:
-            # 占位链路：功能开发中
-            token_generator = _stream_placeholder(route_result.intent)
+            raise HTTPException(
+                status_code=400,
+                detail=f"未知的意图类型: {route_result.intent}",
+            )
     except ValueError as e:
-        # API Key 未配置等预期内错误
         raise HTTPException(status_code=503, detail=str(e))
     except Exception as e:
-        # [缺陷] 宽泛的 Exception 捕获可能掩盖真实问题。
-        # [后续扩展] 细化异常类型，区分"可重试"和"不可重试"错误。
         raise HTTPException(
             status_code=500,
             detail=f"处理请求时发生内部错误: {str(e)}",
         )
 
-    # 步骤3: 以 SSE 格式流式返回
     return StreamingResponse(
         _sse_wrapper(token_generator),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no",  # 禁用 Nginx 缓冲（部署时有用）
-            # [缺陷] 未设置 CORS 头，虽然 main.py 中有全局 CORS 中间件，
-            #   但如果单独部署此路由到其他网关，可能会跨域失败。
+            "X-Accel-Buffering": "no",
         },
     )
 
 
 # ============================================
-# 二、文档上传接口
+# 二、试卷模式出题接口（独立接口）
+# ============================================
+
+class ExamQuizRequest(BaseModel):
+    """试卷模式出题请求"""
+    message: str = Field(..., min_length=1, description="出卷要求")
+    textbook_collections: list[str] = Field(
+        default=["default"],
+        description="教材 Collection 名称列表",
+    )
+    exam_collections: Optional[list[str]] = Field(
+        default=None,
+        description="试卷 Collection 名称列表（不填则从绑定中自动查找）",
+    )
+
+
+@router.post(
+    "/api/quiz/exam",
+    summary="试卷模式出题（SSE 流式）",
+    description="以参考真题卷为模板，从教材知识点范围仿写完整试卷。需先上传教材和真题卷。",
+)
+async def quiz_exam(req: ExamQuizRequest):
+    """试卷模式出题"""
+    try:
+        token_generator = generate_exam_quiz_stream(
+            message=req.message,
+            textbook_collections=req.textbook_collections,
+            exam_collections=req.exam_collections,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    return StreamingResponse(
+        _sse_wrapper(token_generator),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+# ============================================
+# 三、文档上传接口
 # ============================================
 
 @router.post(
     "/api/documents/upload",
     summary="上传文档并入库",
-    description="接收文件上传，保存后自动解析、切分、向量化并存入 ChromaDB。",
     response_model=IngestResponse,
 )
 async def upload_document(
-    file: UploadFile = File(
-        ...,
-        title="文档文件",
-        description="支持 PDF / Markdown / TXT 格式",
-    ),
+    file: UploadFile = File(...),
     collection_name: str = "default",
 ):
-    """
-    文档上传与自动入库接口。
-
-    流程:
-        1. 验证文件格式
-        2. 保存到 data/raw_docs/
-        3. 调用 ingest_document（解析 → 切分 → 向量化 → 入库）
-        4. 返回入库结果
-    """
-    # 步骤1: 验证文件后缀
+    """上传文档 → 解析 → 切分 → 向量化 → 入库"""
     filename = file.filename or "unknown"
     suffix = Path(filename).suffix.lower()
     allowed = {".pdf", ".markdown", ".txt"}
@@ -232,37 +236,24 @@ async def upload_document(
             detail=f"不支持的文件格式 '{suffix}'。支持的格式: {', '.join(allowed)}",
         )
 
-    # 步骤2: 确保上传目录存在
     raw_docs_dir = settings.BASE_DIR / settings.RAW_DOCS_DIR.lstrip("./")
     raw_docs_dir.mkdir(parents=True, exist_ok=True)
 
-    # 步骤3: 保存文件到本地
     save_path = raw_docs_dir / filename
     try:
         with open(save_path, "wb") as f:
-            # 分块读取，避免大文件撑爆内存
-            while chunk := await file.read(1024 * 1024):  # 1MB 每块
+            while chunk := await file.read(1024 * 1024):
                 f.write(chunk)
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"文件保存失败: {str(e)}",
-        )
-    # [缺陷] 没有文件大小限制，恶意上传大文件可能撑爆磁盘。
-    # [后续扩展] 在读取循环中加入 size 累计，超出上限（如 100MB）返回 413 错误。
-    # [缺陷] 同名文件直接覆盖，没有做版本管理或冲突检测。
+        raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
 
-    # 步骤4: 入库
     try:
         chunk_count = ingest_document(
             file_path=str(save_path),
             collection_name=collection_name,
         )
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"文档入库失败: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=f"文档入库失败: {str(e)}")
 
     return IngestResponse(
         filename=filename,
@@ -272,7 +263,7 @@ async def upload_document(
 
 
 # ============================================
-# 三、Collection 列表接口
+# 四、Collection 列表接口
 # ============================================
 
 @router.get(
@@ -281,38 +272,84 @@ async def upload_document(
     response_model=CollectionListResponse,
 )
 async def get_collections():
-    """
-    返回 ChromaDB 中所有的 Collection 名称与总数。
-    用于前端下拉框展示或管理界面。
-    """
+    """返回 ChromaDB 中所有 Collection 名称"""
     try:
         cols = list_collections()
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"获取 Collection 列表失败: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
 
-    return CollectionListResponse(
-        collections=cols,
-        count=len(cols),
-    )
+    return CollectionListResponse(collections=cols, count=len(cols))
 
 
 # ============================================
-# 四、健康检查接口
+# 五、Collection 绑定管理接口
+# ============================================
+
+@router.post(
+    "/api/collections/bind",
+    summary="创建教材-试卷 Collection 绑定",
+    response_model=BindingResponse,
+)
+async def bind_collections(req: BindingRequest):
+    """
+    创建教材 Collection 与试卷 Collection 的绑定关系。
+    绑定后，试卷模式出题会自动找到对应的参考真题卷。
+    """
+    try:
+        binding = create_binding(
+            textbook_collections=req.textbook_collections,
+            exam_collections=req.exam_collections,
+            label=req.label,
+        )
+        return BindingResponse(**binding)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"绑定失败: {str(e)}")
+
+
+@router.get(
+    "/api/collections/bindings",
+    summary="列出所有绑定关系",
+    response_model=list[BindingResponse],
+)
+async def list_bindings():
+    """返回所有教材-试卷 Collection 绑定关系"""
+    try:
+        bindings = get_all_bindings()
+        return [BindingResponse(**b) for b in bindings]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
+
+
+@router.delete(
+    "/api/collections/bindings/{binding_id}",
+    summary="删除绑定关系",
+)
+async def remove_binding(binding_id: str):
+    """删除指定 ID 的绑定关系"""
+    try:
+        deleted = delete_binding(binding_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail=f"绑定 {binding_id} 不存在")
+        return {"message": "绑定已删除", "id": binding_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+# ============================================
+# 六、健康检查接口
 # ============================================
 
 @router.get(
     "/api/health",
     summary="服务健康检查",
-    response_model=None,  # 两个响应模型不同，改为 None 手动返回
 )
-async def health_check(deep: bool = False):
+async def health_check(deep: bool = Query(False, description="是否深度检查依赖组件")):
     """
     健康检查。
-    - 浅度检查 (deep=false): 只验证进程存活，适用于负载均衡健康探测。
-    - 深度检查 (deep=true):  验证 DeepSeek API、ChromaDB、嵌入模型是否可用。
+    - 浅度: 只验证进程存活
+    - 深度: 验证 DeepSeek API / ChromaDB / 嵌入模型
     """
     if not deep:
         return {
@@ -321,7 +358,6 @@ async def health_check(deep: bool = False):
             "version": settings.PROJECT_VERSION,
         }
 
-    # 深度检查：逐一验证依赖组件
     checks = {
         "process": "ok",
         "deepseek_api": "ok",
@@ -329,69 +365,48 @@ async def health_check(deep: bool = False):
         "embedding_model": "ok",
     }
 
-    # 1) 检查 DeepSeek API 可达性
+    # 检查 DeepSeek API
     try:
         from app.core.llm_manager import get_llm
         llm = get_llm(streaming=False)
-        # 发送一个极短的测试请求，验证 API Key 有效且端点可达
         test_response = llm.invoke("ping")
         if not test_response.content:
             raise RuntimeError("API 返回为空")
     except Exception as e:
         checks["deepseek_api"] = f"error: {str(e)[:100]}"
 
-    # 2) 检查 ChromaDB 连通性
+    # 检查 ChromaDB
     try:
-        from app.services.vector_store import list_collections
         list_collections()
     except Exception as e:
         checks["chromadb"] = f"error: {str(e)[:100]}"
 
-    # 3) 检查嵌入模型是否已加载
+    # 检查嵌入模型
     try:
         from app.core.llm_manager import get_embeddings
         emb = get_embeddings()
-        # 尝试用一个短文本测试向量化是否正常
         _ = emb.embed_query("测试文本")
     except Exception as e:
         checks["embedding_model"] = f"error: {str(e)[:100]}"
 
-    # 综合状态：所有组件均 ok 才返回 ok
     all_ok = all(v == "ok" for v in checks.values())
-    overall_status = "ok" if all_ok else "degraded"
-
     return {
-        "status": overall_status,
+        "status": "ok" if all_ok else "degraded",
         "project": settings.PROJECT_NAME,
         "version": settings.PROJECT_VERSION,
         "checks": checks,
     }
 
 
-
 # ============================================
 # 已知缺陷汇总
 # ============================================
 #
-# 1. 【无认证/鉴权】
-#    - 所有接口裸奔，任何人可调。
-#    - 后续至少加入 API Key 鉴权（如 Bearer Token 或简单的 X-API-Key 头）。
-#
-# 2. 【无请求频率限制】
-#    - 无限调用可能消耗大量 API 额度。
-#    - 后续加入 slowapi 或 Redis 令牌桶做速率限制。
-#
-# 3. 【上传文件无去重/版本管理】
-#    - 同名文件直接覆盖，重复上传产生冗余向量。
-#
-# 4. 【无文件大小限制】
-#    - 大文件可能撑爆磁盘或导致 ChromaDB 性能问题。
-#
-# 5. 【无异步检索】
-#    - ask_question_stream 中检索是同步的，阻塞事件循环。
-#
-# 6. 【无请求日志/监控】
-#    - 缺少请求耗时、成功率等基础指标。
-#
-# 7. 【缺少 planner 和 quiz 链路的真实实现】
-#    - 当前仅返回占位文本，核心功能缺失。
+# 1. 【无认证/鉴权】所有接口裸奔，任何人可调。
+# 2. 【无请求频率限制】无限调用可能消耗大量 API 额度。
+# 3. 【试卷模式独立接口 /api/quiz/exam 与 /api/chat 分离】
+#    - 用户在聊天中说"出一张卷子"会走简单出题模式。
+#    - 试卷模式需要前端显式调用 /api/quiz/exam 接口。
+#    - [后续扩展] 在意图路由中识别"出一张完整试卷"→自动路由到试卷模式。
+# 4. 【无请求日志/监控】缺少请求耗时、成功率等基础指标。
+# 5. 【上传文件无大小限制】恶意上传可能撑爆磁盘。
