@@ -109,19 +109,43 @@ def add_documents(
     if not docs:
         return 0
 
+    # ---- 文本哈希去重 ----
+    import hashlib
+
     vector_store = get_vector_store(collection_name)
 
-    # Chroma.add_documents 会自动调用 embedding_function 做向量化
-    # ids 使用自增，保证每条记录可唯一定位
+    # 获取已有文档的内容哈希集合
     existing_count = vector_store._collection.count()
-    ids = [f"doc_{existing_count + i}" for i in range(len(docs))]
+    if existing_count > 0:
+        existing_data = vector_store._collection.get(
+            include=["metadatas"]
+        )
+        existing_hashes = {
+            m.get("content_hash", "")
+            for m in (existing_data.get("metadatas") or [])
+            if m
+        }
+    else:
+        existing_hashes = set()
 
-    vector_store.add_documents(documents=docs, ids=ids)
+    # 过滤掉重复的文档块
+    new_docs = []
+    for doc in docs:
+        content_hash = hashlib.sha256(doc.page_content.encode("utf-8")).hexdigest()
+        if content_hash in existing_hashes:
+            continue  # 重复块，跳过
+        doc.metadata["content_hash"] = content_hash
+        new_docs.append(doc)
 
-    # [缺陷] 每次 add_documents 都会重新初始化 Chroma 连接，
-    #   大批量入库时效率低。后续应改为连接池或上下文管理器。
+    if not new_docs:
+        return 0  # 全部重复，无需入库
 
-    return len(docs)
+    # 入库新文档块
+    ids = [f"doc_{existing_count + i}" for i in range(len(new_docs))]
+    vector_store.add_documents(documents=new_docs, ids=ids)
+
+    return len(new_docs)
+
 
 
 # ============================================
@@ -132,6 +156,7 @@ def search_documents(
     query: str,
     collection_name: str = "default",
     k: Optional[int] = None,
+    metadata_filter: Optional[dict] = None,
 ) -> List[Document]:
     """
     在指定 Collection 中进行相似度检索，返回最相关的文档块。
@@ -140,6 +165,8 @@ def search_documents(
         query:           用户查询文本
         collection_name: 目标 Collection 名称
         k:               返回的文档数量（默认取配置中的 RETRIEVAL_K）
+        metadata_filter: 元数据过滤条件，如 {"subject": "高数", "year": "2023"}
+                         为 None 时不过滤。
 
     返回:
         相关度降序排列的 Document 列表（每个包含 page_content 和 metadata）
@@ -149,29 +176,28 @@ def search_documents(
 
     vector_store = get_vector_store(collection_name)
 
-    # 检查 Collection 是否为空
     if vector_store._collection.count() == 0:
         return []
 
-    # 使用带分数的检索 API，便于过滤低相关度结果
+    # 构建 ChromaDB 支持的 where 过滤条件
+    search_kwargs = {"k": k}
+    if metadata_filter:
+        search_kwargs["filter"] = metadata_filter
+
     results_with_scores = vector_store.similarity_search_with_score(
         query=query,
-        k=k,
+        **search_kwargs,
     )
 
-    # 按相似度阈值过滤（余弦距离越小越相关，0 = 完全匹配，1 = 完全不相关）
     threshold = settings.RETRIEVAL_THRESHOLD
     filtered_docs: List[Document] = []
     for doc, score in results_with_scores:
-        # [注] ChromaDB 的 similarity_search_with_score 返回的是余弦距离
-        # 距离 = 0 表示完全相同，距离 = 1 表示正交（无关）
-        # 因此 "score <= threshold" 表示只保留距离小于阈值的文档
         if threshold <= 0.0 or score <= threshold:
-            # 将分数存入 metadata，供后续引用标注使用
             doc.metadata["relevance_score"] = round(score, 4)
             filtered_docs.append(doc)
 
     return filtered_docs
+
 
 
 

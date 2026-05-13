@@ -127,33 +127,68 @@ def split_by_markdown_headers(docs: List[Document]) -> List[Document]:
     chunk_splitter = RecursiveCharacterTextSplitter(
         chunk_size=settings.CHUNK_SIZE,
         chunk_overlap=settings.CHUNK_OVERLAP,
-        separators=["\n\n", "\n", "。", ".", " "],
+                separators=[
+            "\n\n",     # 空行（段落边界）
+            "\n",       # 换行
+            "$$",       # 独立公式块结束（LaTeX 数学环境边界）
+            "。",       # 中文句号
+            ". ",       # 英文句号后空格
+            "；",       # 中文分号
+            "; ",       # 英文分号后空格
+            "，",       # 中文逗号
+            ", ",       # 英文逗号后空格
+            " ",        # 最终兜底：按空格拆
+        ],
+
         # [缺陷] 当前分隔符仅适配中英文混合，未针对数学公式、代码块优化。
     )
 
     final_docs: List[Document] = []
 
     for doc in docs:
-        # 步骤1: Markdown 标题切分
+        # 步骤1: Markdown 标题切分（最优策略）
         try:
             header_chunks = header_splitter.split_text(doc.page_content)
         except Exception:
-            # [缺陷] 如果文档没有标准 Markdown 标题结构，
-            #   split_text 可能返回空列表。此时回退到纯字符切分。
-            header_chunks = [Document(page_content=doc.page_content, metadata=doc.metadata)]
+            header_chunks = []
 
-        # 如果没有标题结构，直接把原文送去字符切分
-        if not header_chunks:
-            header_chunks = [Document(page_content=doc.page_content, metadata=doc.metadata)]
+        # 步骤2: 标题切分未生效 → 退化为段落切分（中间层兜底）
+        # MarkdownHeaderTextSplitter 即使没标题也返回 1 个 Document，
+        # 所以需要检查切出来的块是否真的携带了标题元数据
+        has_header_metadata = any(
+            chunk_doc.metadata.get("Header_1") for chunk_doc in header_chunks
+        )
+        if not has_header_metadata:
+            paragraphs = [p.strip() for p in doc.page_content.split("\n\n") if p.strip()]
 
-        # 步骤2: 对每个块做长度检查，超长再切
+            if paragraphs:
+                header_chunks = [
+                    Document(
+                        page_content=p,
+                        metadata={**doc.metadata, "split_method": "paragraph"},
+                    )
+                    for p in paragraphs
+                ]
+            else:
+                # 步骤3: 段落也分不出来 → 最终退化：整个文档作为一个块
+                header_chunks = [
+                    Document(
+                        page_content=doc.page_content,
+                        metadata={**doc.metadata, "split_method": "raw"},
+                    )
+                ]
+
+
+        # 步骤4: 对每个块做长度检查，超长再切
         for chunk_doc in header_chunks:
             chunk_text = chunk_doc.page_content.strip()
             if not chunk_text:
                 continue
 
             # 合并元数据：原始文档元数据 + 标题切分产生的层级元数据
-            merged_metadata = {**doc.metadata, **chunk_doc.metadata, "split_method": "header"}
+            # 保留先前设置的切分方法（如 paragraph/raw），未设置时默认 header
+            chunk_doc.metadata.setdefault("split_method", "header")
+            merged_metadata = {**doc.metadata, **chunk_doc.metadata}
 
             if len(chunk_text) <= settings.CHUNK_SIZE:
                 final_docs.append(
