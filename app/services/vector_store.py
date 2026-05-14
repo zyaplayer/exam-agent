@@ -57,6 +57,65 @@ def _get_persistent_client() -> chromadb.PersistentClient:
                 ),
             )
         return _chroma_clients[persist_dir]
+    
+# ============================================
+# Collection 名称转码
+# ============================================
+
+# 中文名称 → 有效 ChromaDB 名称的映射文件
+_ALIASES_FILE = settings.BASE_DIR / "data" / "collection_aliases.json"
+
+
+def _sanitize_collection_name(name: str) -> str:
+    """
+    将用户输入的名称转为 ChromaDB 允许的格式（[a-zA-Z0-9._-]）。
+
+    规则:
+      1. 纯英文/数字 → 直接使用
+      2. 含有中文/特殊字符 → 保留原文字符为前缀取前8字 + 短哈希
+         例如 "高数教材" → "gsc_7f3a"
+
+    同时将映射关系存入 aliases.json，供前端展示原始名称。
+    """
+    import re
+    import hashlib
+    import json
+
+    # 检查名称是否已合法
+    if re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*[a-zA-Z0-9]$", name) and len(name) >= 3:
+        return name
+
+    # 不合法的名称 → 生成别名
+    aliases = {}
+    if _ALIASES_FILE.exists():
+        try:
+            aliases = json.loads(_ALIASES_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # 如果之前已为此中文名生成过映射，直接返回
+    if name in aliases:
+        return aliases[name]
+
+    # 提取中文拼音首字母作为前缀
+    import unicodedata
+    safe_prefix = re.sub(r"[^a-zA-Z0-9]", "", name)[:8] or "col"
+    
+    # 后缀用哈希前6位确保唯一
+    name_hash = hashlib.md5(name.encode()).hexdigest()[:6]
+    
+    safe_name = f"{safe_prefix}_{name_hash}"
+
+    # 保存映射
+    aliases[name] = safe_name
+    _ALIASES_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _ALIASES_FILE.write_text(
+        json.dumps(aliases, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+    return safe_name
+
 
 
 def get_vector_store(
@@ -72,6 +131,7 @@ def get_vector_store(
     返回:
         langchain_chroma.Chroma 实例，可直接调用 add_documents / similarity_search
     """
+    collection_name = _sanitize_collection_name(collection_name)
     shared_client = _get_persistent_client()
 
     vector_store = Chroma(
@@ -108,6 +168,8 @@ def add_documents(
     """
     if not docs:
         return 0
+
+    collection_name = _sanitize_collection_name(collection_name)
 
     # ---- 文本哈希去重 ----
     import hashlib
@@ -174,6 +236,8 @@ def search_documents(
     if k is None:
         k = settings.RETRIEVAL_K
 
+    collection_name = _sanitize_collection_name(collection_name)
+
     vector_store = get_vector_store(collection_name)
 
     if vector_store._collection.count() == 0:
@@ -207,15 +271,27 @@ def search_documents(
 
 def list_collections() -> List[str]:
     """
-    列出当前 ChromaDB 中所有的 Collection 名称。
-    可用于管理界面展示或 API 调用。
+    列出当前 ChromaDB 中所有的 Collection 名称（返回原始中文名）。
 
     返回:
-        Collection 名称列表
+        Collection 名称列表（已从内部安全名反向映射为原始名称）
     """
+    import json
     client = _get_persistent_client()
     collections = client.list_collections()
-    return [col.name for col in collections]
+    safe_names = [col.name for col in collections]
+
+    # 尝试从 aliases.json 反向映射为原始中文名称
+    reverse_aliases: dict[str, str] = {}
+    if _ALIASES_FILE.exists():
+        try:
+            aliases = json.loads(_ALIASES_FILE.read_text(encoding="utf-8"))
+            reverse_aliases = {v: k for k, v in aliases.items()}
+        except Exception:
+            pass
+
+    display_names = [reverse_aliases.get(name, name) for name in safe_names]
+    return display_names
 
 
 
@@ -230,6 +306,7 @@ def delete_collection(collection_name: str) -> bool:
         是否成功删除
     """
 
+    collection_name = _sanitize_collection_name(collection_name)
     client = _get_persistent_client()
 
 
@@ -265,6 +342,8 @@ def ingest_document(
         >>> print(f"已入库 {n} 个知识块")
     """
     from app.utils.document import process_document
+
+    collection_name = _sanitize_collection_name(collection_name)
 
     # 步骤1+2: 加载并切分文档
     chunks = process_document(file_path)

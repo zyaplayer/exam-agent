@@ -442,6 +442,8 @@
     // 全局状态
     // ============================================
     let isStreaming = false;
+    // 对话ID：页面加载时自动生成
+    let currentConversationId = 'conv_' + Math.random().toString(36).substring(2, 14);
     // [缺陷] 全局变量管理简单，但没有做状态持久化。
     // [后续扩展] 引入简单的状态管理对象，支持对话历史本地暂存。
 
@@ -530,6 +532,7 @@
                 body: JSON.stringify({
                     message: content,
                     collection_name: collectionSel.value,
+                    conversation_id: currentConversationId,
                 }),
             });
 

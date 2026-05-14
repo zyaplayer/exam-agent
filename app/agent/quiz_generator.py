@@ -252,6 +252,7 @@ def _parse_simple_quiz_params(message: str) -> dict:
 async def generate_simple_quiz_stream(
     message: str,
     collection_name: str = "default",
+    conversation_id: str = "",
 ) -> AsyncIterator[str]:
     """
     简单出题模式（流式）。
@@ -292,7 +293,7 @@ async def generate_simple_quiz_stream(
         )
 
     # 步骤4: LLM 生成题目（流式）
-    llm = get_llm(provider="deepseek", temperature=0.6, streaming=True)
+    llm = get_llm(provider="deepseek", temperature=0.3, streaming=True)
 
     from langchain_core.messages import SystemMessage, HumanMessage
 

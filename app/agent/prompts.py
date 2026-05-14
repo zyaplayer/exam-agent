@@ -27,6 +27,8 @@ QA_USER_PROMPT_TEMPLATE = """\
 ## 学生的提问
 {question}
 
+{conversation_history}
+
 ## 参考知识片段（来自教材/笔记/真题）
 以下是从知识库中检索出的与问题最相关的内容片段。请严格基于这些片段作答。
 如果这些片段未覆盖问题的答案，请明确告知。
@@ -197,6 +199,8 @@ PLANNER_GENERATE_USER_TEMPLATE = """\
 ## 各科目教材目录大纲
 {subject_outlines}
 
+{conversation_history}
+
 ## 要求
 1. 制定"基础-强化-冲刺"三阶段计划
 2. 每个阶段给出明确的起止日期（基于考试日期和剩余天数计算）
@@ -235,6 +239,8 @@ PLANNER_FLEXIBLE_USER_TEMPLATE = """\
 
 ## 各科目教材目录大纲
 {subject_outlines}
+
+{conversation_history}
 
 ## 要求
 1. 按章节依赖关系排序学习顺序

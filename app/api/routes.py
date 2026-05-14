@@ -10,7 +10,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -26,6 +26,11 @@ from app.agent.quiz_generator import (
 )
 from app.agent.planner_chain import generate_plan_stream
 from app.services.vector_store import ingest_document, list_collections
+from app.services.conversation_service import (
+    new_conversation_id,
+    append_message,
+    get_history,
+)
 
 
 # ============================================
@@ -51,7 +56,10 @@ class ChatRequest(BaseModel):
         default="default",
         description="要检索的知识库 Collection 名称",
     )
-    # [缺陷] 缺少 conversation_id 字段，无法关联多轮对话历史。
+    conversation_id: str = Field(
+        default="",
+        description="对话ID（不传则自动创建新对话）",
+    )
 
 
 class ChatErrorResponse(BaseModel):
@@ -128,22 +136,27 @@ async def chat(req: ChatRequest):
     # 步骤1: 意图识别（混合方案：规则 + LLM）
     route_result = classify_intent(req.message)
 
+    # 步骤1.5: 管理对话ID
+    conv_id = req.conversation_id or new_conversation_id()
+
     # 步骤2: 根据意图选择处理链路
     try:
         if route_result.intent == Intent.QA:
             token_generator = ask_question_stream(
                 question=req.message,
                 collection_name=req.collection_name,
+                conversation_id=conv_id,
             )
         elif route_result.intent == Intent.QUIZ:
-            # 简单出题模式（试卷模式需单独调用 /api/quiz/exam）
             token_generator = generate_simple_quiz_stream(
                 message=req.message,
                 collection_name=req.collection_name,
+                conversation_id=conv_id,
             )
         elif route_result.intent == Intent.PLANNER:
             token_generator = generate_plan_stream(
                 message=req.message,
+                conversation_id=conv_id,
             )
         else:
             raise HTTPException(
@@ -158,8 +171,17 @@ async def chat(req: ChatRequest):
             detail=f"处理请求时发生内部错误: {str(e)}",
         )
 
+    # 步骤3: 包装生成器（收集完整回复 → 保存历史）
+    async def history_wrapper():
+        full_answer = []
+        async for token in token_generator:
+            full_answer.append(token)
+            yield token
+        append_message(conv_id, "user", req.message)
+        append_message(conv_id, "assistant", "".join(full_answer))
+
     return StreamingResponse(
-        _sse_wrapper(token_generator),
+        _sse_wrapper(history_wrapper()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -224,7 +246,8 @@ async def quiz_exam(req: ExamQuizRequest):
 )
 async def upload_document(
     file: UploadFile = File(...),
-    collection_name: str = "default",
+        collection_name: str = Form("default"),
+
 ):
     """上传文档 → 解析 → 切分 → 向量化 → 入库"""
     filename = file.filename or "unknown"
@@ -335,6 +358,67 @@ async def remove_binding(binding_id: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除失败: {str(e)}")
+
+
+# ============================================
+# 六、对话历史管理接口
+# ============================================
+
+from app.services.conversation_service import (
+    get_history as get_conv_history,
+    delete_conversation,
+    list_conversations,
+)
+
+
+@router.get(
+    "/api/conversations",
+    summary="列出所有对话",
+)
+async def list_convs():
+    """返回所有对话列表（用于前端对话历史面板）"""
+    try:
+        return {"conversations": list_conversations()}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
+    "/api/conversations/{conversation_id}",
+    summary="获取指定对话的历史",
+)
+async def get_conv(conversation_id: str):
+    """返回指定对话的完整历史消息"""
+    history = get_conv_history(conversation_id)
+    return {"conversation_id": conversation_id, "messages": history}
+
+
+@router.delete(
+    "/api/conversations/{conversation_id}",
+    summary="删除对话历史",
+)
+async def delete_conv(conversation_id: str):
+    """删除指定对话的历史"""
+    if delete_conversation(conversation_id):
+        return {"message": "对话已删除", "conversation_id": conversation_id}
+    raise HTTPException(status_code=404, detail="对话不存在")
+
+
+# ============================================
+# 五.2 Collection 名称映射查询
+# ============================================
+
+@router.get(
+    "/api/collections/aliases",
+    summary="获取 Collection 名称映射（中文→内部名）",
+)
+async def get_aliases():
+    """返回 collection_aliases.json 的内容，供前端展示原始中文名称"""
+    import json
+    aliases_file = settings.BASE_DIR / "data" / "collection_aliases.json"
+    if not aliases_file.exists():
+        return {"aliases": {}}
+    return {"aliases": json.loads(aliases_file.read_text(encoding="utf-8"))}
 
 
 # ============================================

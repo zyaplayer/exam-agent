@@ -3,6 +3,9 @@
 =================================
 启动 API 服务，挂载路由、CORS 中间件、静态文件服务。
 """
+import os
+os.environ["HF_ENDPOINT"] = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
+
 
 from contextlib import asynccontextmanager
 from pathlib import Path

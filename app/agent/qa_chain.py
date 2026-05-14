@@ -114,10 +114,14 @@ def ask_question(
     context = _format_retrieved_context(retrieved_docs)
 
 
-    # 步骤4: 组装 Prompt
+    # 步骤4: 组装 Prompt（注入对话历史）
+    from app.services.conversation_service import format_history_for_prompt
+    conversation_history = format_history_for_prompt(conversation_id) if conversation_id else ""
+
     user_prompt = QA_USER_PROMPT_TEMPLATE.format(
         question=question,
         context=context,
+        conversation_history=conversation_history,
     )
 
     # 步骤5: 调用 LLM
@@ -150,6 +154,7 @@ async def ask_question_stream(
     collection_name: str = "default",
     k: int | None = None,
     temperature: float = 0.7,
+    conversation_id: str = "",
 ) -> AsyncIterator[str]:
     """
     RAG 知识问答（流式），逐 token 返回生成内容。
@@ -199,10 +204,14 @@ async def ask_question_stream(
     context = _format_retrieved_context(retrieved_docs)
 
 
-    # 步骤4: 组装 Prompt
+    # 步骤4: 组装 Prompt（注入对话历史）
+    from app.services.conversation_service import format_history_for_prompt
+    conversation_history = format_history_for_prompt(conversation_id) if conversation_id else ""
+
     user_prompt = QA_USER_PROMPT_TEMPLATE.format(
         question=question,
         context=context,
+        conversation_history=conversation_history,
     )
 
     # 步骤5: 调用流式 LLM

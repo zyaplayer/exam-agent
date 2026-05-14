@@ -226,6 +226,7 @@ async def _extract_student_info(message: str) -> dict:
 async def generate_plan_stream(
     message: str,
     exam_date_override: Optional[str] = None,
+    conversation_id: str = "",
 ) -> AsyncIterator[str]:
     """
     根据用户消息生成备考计划（流式返回）。
@@ -280,6 +281,10 @@ async def generate_plan_stream(
 
     from langchain_core.messages import SystemMessage, HumanMessage
 
+    # 注入对话历史
+    from app.services.conversation_service import format_history_for_prompt
+    conversation_history = format_history_for_prompt(conversation_id) if conversation_id else ""
+
     if use_timeline:
         # ---- 时间线模式 ----
         system_prompt = PLANNER_GENERATE_SYSTEM_PROMPT
@@ -297,6 +302,7 @@ async def generate_plan_stream(
             subject_outlines="\n".join(outline_texts)
                 if outline_texts
                 else "（暂无章节目录大纲，请在 data/summary_db/ 中放入教材目录文件）",
+            conversation_history=conversation_history,
         )
         # 先输出时间线信息
         yield f"## 备考时间规划\n"
@@ -323,6 +329,7 @@ async def generate_plan_stream(
             subject_outlines="\n".join(outline_texts)
                 if outline_texts
                 else "（暂无章节目录大纲，请在 data/summary_db/ 中放入教材目录文件）",
+            conversation_history=conversation_history,
         )
         yield "## 灵活学习路线（无固定日期）\n\n"
 
