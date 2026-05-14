@@ -264,6 +264,101 @@ def search_documents(
 
 
 
+def hybrid_search(
+    query: str,
+    collection_name: str = "default",
+    k: Optional[int] = None,
+    vector_weight: float = 0.6,
+    metadata_filter: Optional[dict] = None,
+) -> List[Document]:
+    """
+    混合检索：稠密向量 + BM25 关键词，加权融合排序。
+
+    参数:
+        query:           用户查询文本
+        collection_name: 目标 Collection 名称
+        k:               返回的文档数量
+        vector_weight:   向量分数权重（0~1），剩余为 BM25 权重。
+                         0.6 = 偏语义，0.3 = 偏关键词精确匹配。
+        metadata_filter: 元数据过滤条件
+
+    返回:
+        加权融合后排序的 Document 列表
+    """
+    from rank_bm25 import BM25Okapi
+    import jieba  # type: ignore  # 无类型存根，运行时正常
+
+    if k is None:
+        k = settings.RETRIEVAL_K
+
+    vector_store = get_vector_store(collection_name)
+
+    collection_count = vector_store._collection.count()
+    if collection_count == 0:
+        return []
+
+    # ---- 步骤1: 获取全量文档用于 BM25 ----
+    all_data = vector_store._collection.get(include=["documents", "metadatas"])
+    all_docs = all_data.get("documents") or []
+    all_metadatas = all_data.get("metadatas") or []
+    if not all_docs:
+        return []
+
+    # 中文分词
+    tokenized_corpus = [list(jieba.cut(doc)) for doc in all_docs]
+    tokenized_query = list(jieba.cut(query))
+
+    # ---- 步骤2: BM25 关键词检索 ----
+    bm25 = BM25Okapi(tokenized_corpus)
+    bm25_scores = bm25.get_scores(tokenized_query)
+    bm25_max = max(bm25_scores) if bm25_scores else 1
+    bm25_normalized = [s / bm25_max if bm25_max else 0 for s in bm25_scores]
+
+    # ---- 步骤3: 向量检索 ----
+    search_kwargs = {"k": collection_count}
+    if metadata_filter:
+        search_kwargs["filter"] = metadata_filter
+    results_with_scores = vector_store.similarity_search_with_score(query=query, **search_kwargs)
+    vectors_by_id = {}
+    for doc, score in results_with_scores:
+        doc_id = doc.metadata.get("content_hash", doc.page_content[:50])
+        vectors_by_id[doc_id] = score
+
+    # ---- 步骤4: 加权融合 ----
+    final_scores: list[tuple[Document, float]] = []
+    for i, doc_text in enumerate(all_docs):
+        doc = Document(
+            page_content=doc_text,
+            metadata=all_metadatas[i] if i < len(all_metadatas) else {},
+        )
+        content_hash = doc.metadata.get("content_hash", doc.page_content[:50])
+        vec_score_raw = vectors_by_id.get(content_hash, 2.0)
+        vec_score = max(0, 1 - vec_score_raw / 2.0)
+        keyword_score = bm25_normalized[i]
+        combined = vector_weight * vec_score + (1 - vector_weight) * keyword_score
+        doc.metadata["keyword_score"] = round(keyword_score, 4)
+        doc.metadata["vector_score"] = round(vec_score, 4)
+        doc.metadata["combined_score"] = round(combined, 4)
+        final_scores.append((doc, combined))
+
+    # 去重 + 按融合分数排序
+    seen = set()
+    deduped: list[Document] = []
+    final_scores.sort(key=lambda x: x[1], reverse=True)
+    for doc, score in final_scores:
+        content_hash = doc.metadata.get("content_hash", "")
+        if content_hash in seen:
+            continue
+        seen.add(content_hash)
+        if settings.RETRIEVAL_THRESHOLD <= 0.0 or score >= (1 - settings.RETRIEVAL_THRESHOLD / 2.0):
+            doc.metadata["relevance_score"] = round(score, 4)
+            deduped.append(doc)
+            if len(deduped) >= k:
+                break
+
+    return deduped
+
+
 
 # ============================================
 # 第四部分：Collection 管理

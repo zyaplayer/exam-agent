@@ -3,418 +3,153 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>考研伴学 Agent - 测试页</title>
+    <title>考研伴学 Agent</title>
+
+    <!-- KaTeX: LaTeX 公式渲染 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"></script>
+
+    <!-- marked.js: Markdown 渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+
     <style>
-        /* ============================================
-           全局变量与基础重置
-           ============================================ */
         :root {
-            --primary: #4f46e5;
-            --primary-light: #818cf8;
-            --bg: #f8fafc;
-            --card-bg: #ffffff;
-            --text: #1e293b;
-            --text-muted: #64748b;
-            --border: #e2e8f0;
-            --bubble-user: #4f46e5;
-            --bubble-ai: #f1f5f9;
-            --radius: 12px;
-            --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+            --primary: #4f46e5; --primary-light: #818cf8; --bg: #f8fafc;
+            --card-bg: #ffffff; --text: #1e293b; --text-muted: #64748b;
+            --border: #e2e8f0; --bubble-user: #4f46e5; --bubble-ai: #f1f5f9;
+            --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.06);
         }
-
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
-            background: var(--bg);
-            color: var(--text);
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
+            background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
         }
-
-        /* ============================================
-           顶部导航栏
-           ============================================ */
         .header {
-            background: var(--card-bg);
-            border-bottom: 1px solid var(--border);
-            padding: 12px 24px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            box-shadow: var(--shadow);
+            background: var(--card-bg); border-bottom: 1px solid var(--border);
+            padding: 12px 24px; display: flex; align-items: center; gap: 12px; box-shadow: var(--shadow);
         }
-        .header .logo {
-            font-size: 20px;
-            font-weight: 700;
-            color: var(--primary);
-        }
-        .header .subtitle {
-            font-size: 13px;
-            color: var(--text-muted);
-        }
-        .header .status {
-            margin-left: auto;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-        .header .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #22c55e; /* 绿色=在线 */
-            /* [缺陷] 在线状态灯只是静态装饰，未真正检测后端连通性。
-               [后续扩展] 定时调 GET /api/health，不通时变红。 */
-        }
+        .header .logo { font-size: 20px; font-weight: 700; color: var(--primary); }
+        .header .subtitle { font-size: 13px; color: var(--text-muted); }
+        .header .status { margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); cursor: pointer; }
+        .header .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #94a3b8; transition: background 0.3s; }
+        .header .status-dot.online { background: #22c55e; }
+        .header .status-dot.offline { background: #ef4444; }
+        .header .new-chat-btn { margin-left: 8px; background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 4px 12px; font-size: 12px; cursor: pointer; }
 
-        /* ============================================
-           聊天主区域
-           ============================================ */
-        .chat-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 24px;
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
+        .tab-bar { display: flex; gap: 0; border-bottom: 2px solid var(--border); padding: 0 24px; background: var(--card-bg); }
+        .tab-btn { padding: 10px 20px; border: none; background: none; font-size: 14px; font-weight: 600; color: var(--text-muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all 0.2s; }
+        .tab-btn.active { color: var(--primary); border-bottom-color: var(--primary); }
 
-        /* 空状态提示 */
-        .empty-state {
-            margin: auto;
-            text-align: center;
-            color: var(--text-muted);
-        }
-        .empty-state .icon {
-            font-size: 48px;
-            margin-bottom: 12px;
-        }
-        .empty-state h2 {
-            font-size: 18px;
-            margin-bottom: 6px;
-            color: var(--text);
-        }
-        .empty-state p {
-            font-size: 14px;
-            max-width: 400px;
-            line-height: 1.6;
-        }
+        .chat-container { flex: 1; overflow-y: auto; padding: 24px; display: flex; flex-direction: column; gap: 16px; }
+        .empty-state { margin: auto; text-align: center; color: var(--text-muted); }
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        .empty-state h2 { font-size: 18px; margin-bottom: 6px; color: var(--text); }
+        .empty-state p { font-size: 14px; max-width: 400px; line-height: 1.6; }
 
-        /* 消息气泡 */
-        .message {
-            display: flex;
-            gap: 10px;
-            max-width: 80%;
-            animation: fadeIn 0.3s ease;
-        }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
-            to   { opacity: 1; transform: translateY(0); }
-        }
-        .message.user {
-            align-self: flex-end;
-            flex-direction: row-reverse;
-        }
-        .message.ai {
-            align-self: flex-start;
-        }
-        .message .avatar {
-            width: 34px;
-            height: 34px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 16px;
-            flex-shrink: 0;
-        }
-        .message.user .avatar {
-            background: var(--primary);
-            color: #fff;
-        }
-        .message.ai .avatar {
-            background: var(--bubble-ai);
-            color: var(--primary);
-        }
-        .message .bubble {
-            padding: 12px 16px;
-            border-radius: var(--radius);
-            line-height: 1.7;
-            font-size: 15px;
-            word-break: break-word;
-        }
-        .message.user .bubble {
-            background: var(--bubble-user);
-            color: #fff;
-            border-bottom-right-radius: 4px;
-        }
-        .message.ai .bubble {
-            background: var(--bubble-ai);
-            border-bottom-left-radius: 4px;
-        }
+        .message { display: flex; gap: 10px; max-width: 80%; animation: fadeIn 0.3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .message.user { align-self: flex-end; flex-direction: row-reverse; }
+        .message.ai { align-self: flex-start; }
+        .message .avatar { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+        .message.user .avatar { background: var(--primary); color: #fff; }
+        .message.ai .avatar { background: var(--bubble-ai); color: var(--primary); }
+        .message .bubble { padding: 12px 16px; border-radius: var(--radius); line-height: 1.7; font-size: 15px; word-break: break-word; }
+        .message.user .bubble { background: var(--bubble-user); color: #fff; border-bottom-right-radius: 4px; }
+        .message.ai .bubble { background: var(--bubble-ai); border-bottom-left-radius: 4px; }
+        .message.ai .bubble.streaming::after { content: " ▌"; animation: blink 1s step-end infinite; }
+        @keyframes blink { 50% { opacity: 0; } }
+        .message.ai .bubble.error { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
+        .message.ai .bubble.error button { margin-top: 8px; background: var(--primary); color: #fff; border: none; border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 13px; }
 
-        /* 流式输出时闪烁光标效果 */
-        .message.ai .bubble.streaming::after {
-            content: " ▌";
-            animation: blink 1s step-end infinite;
-        }
-        @keyframes blink {
-            50% { opacity: 0; }
-        }
+        /* KaTeX 公式样式 */
+        .bubble .katex-display { margin: 8px 0; overflow-x: auto; }
+        .bubble .katex { font-size: 1.1em; }
+        /* Markdown 渲染后的样式 */
+        .bubble h2 { font-size: 1.2em; margin: 10px 0 6px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+        .bubble h3 { font-size: 1.05em; margin: 8px 0 4px; }
+        .bubble ul, .bubble ol { margin: 4px 0; padding-left: 20px; }
+        .bubble code { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+        .bubble pre { background: #1e293b; color: #e2e8f0; padding: 12px; border-radius: 8px; overflow-x: auto; margin: 8px 0; }
+        .bubble pre code { background: none; padding: 0; color: inherit; }
+        .bubble blockquote { border-left: 3px solid var(--primary-light); padding-left: 12px; color: var(--text-muted); margin: 8px 0; }
+        .bubble table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+        .bubble th, .bubble td { border: 1px solid var(--border); padding: 6px 10px; font-size: 0.9em; }
+        .bubble th { background: var(--bg); }
 
-        /* 错误气泡 */
-        .message.ai .bubble.error {
-            background: #fef2f2;
-            color: #dc2626;
-            border: 1px solid #fecaca;
-        }
+        .input-area { background: var(--card-bg); border-top: 1px solid var(--border); padding: 16px 24px; display: flex; gap: 12px; align-items: flex-end; box-shadow: 0 -1px 3px rgba(0,0,0,0.04); }
+        .input-area textarea { flex: 1; border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 14px; font-size: 15px; font-family: inherit; resize: none; min-height: 44px; max-height: 150px; outline: none; transition: border-color 0.2s; }
+        .input-area textarea:focus { border-color: var(--primary-light); box-shadow: 0 0 0 3px rgba(79,70,229,0.1); }
+        .input-area button { background: var(--primary); color: #fff; border: none; border-radius: var(--radius); padding: 10px 20px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
+        .input-area button:hover { background: var(--primary-light); }
+        .input-area button:disabled { background: #cbd5e1; cursor: not-allowed; }
+        .input-area select { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: 14px; font-family: inherit; background: var(--card-bg); outline: none; cursor: pointer; min-width: 120px; }
 
-        /* ============================================
-           底部输入栏
-           ============================================ */
-        .input-area {
-            background: var(--card-bg);
-            border-top: 1px solid var(--border);
-            padding: 16px 24px;
-            display: flex;
-            gap: 12px;
-            align-items: flex-end;
-            box-shadow: 0 -1px 3px rgba(0,0,0,0.04);
-        }
-        .input-area textarea {
-            flex: 1;
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 10px 14px;
-            font-size: 15px;
-            font-family: inherit;
-            resize: none;
-            min-height: 44px;
-            max-height: 150px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        .input-area textarea:focus {
-            border-color: var(--primary-light);
-            box-shadow: 0 0 0 3px rgba(79,70,229,0.1);
-        }
-        .input-area button {
-            background: var(--primary);
-            color: #fff;
-            border: none;
-            border-radius: var(--radius);
-            padding: 10px 20px;
-            font-size: 15px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-            white-space: nowrap;
-        }
-        .input-area button:hover {
-            background: var(--primary-light);
-        }
-        .input-area button:disabled {
-            background: #cbd5e1;
-            cursor: not-allowed;
-        }
-        .input-area select {
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 10px 12px;
-            font-size: 14px;
-            font-family: inherit;
-            background: var(--card-bg);
-            outline: none;
-            cursor: pointer;
-            min-width: 120px;
-        }
+        .panel { display: none; flex: 1; overflow-y: auto; padding: 24px; }
+        .panel.active { display: flex; flex-direction: column; }
+        #managePanel { gap: 16px; }
+        .manage-section { background: var(--card-bg); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow); }
+        .manage-section h3 { font-size: 15px; margin-bottom: 12px; color: var(--text); }
+        .col-grid { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+        .col-tag { padding: 4px 12px; border-radius: 20px; font-size: 13px; cursor: pointer; user-select: none; border: 1px solid var(--border); background: var(--bg); transition: all 0.2s; }
+        .col-tag.selected { background: var(--primary); color: #fff; border-color: var(--primary); }
+        .manage-section input { border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; font-family: inherit; outline: none; width: 100%; margin-bottom: 8px; }
+        .manage-section input:focus { border-color: var(--primary-light); }
+        .manage-section button { background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
+        .manage-section button:hover { background: var(--primary-light); }
+        .binding-card { background: var(--bg); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+        .binding-card .del-btn { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 
-        /* ============================================
-           响应式适配
-           ============================================ */
+        /* 移动端适配 */
         @media (max-width: 640px) {
-            .message { max-width: 90%; }
+            .message { max-width: 92%; }
             .input-area { flex-wrap: wrap; padding: 12px 16px; }
             .input-area select { flex: 1; min-width: 0; }
             .input-area button { width: 100%; }
-        }
-        /*  ============================================
-        管理面板样式
-            ============================================ */
-        .tab-bar {
-            display: flex;
-            gap: 0;
-            border-bottom: 2px solid var(--border);
-            padding: 0 24px;
-            background: var(--card-bg);
-        }
-        .tab-btn {
-            padding: 10px 20px;
-            border: none;
-            background: none;
-            font-size: 14px;
-            font-weight: 600;
-            color: var(--text-muted);
-            cursor: pointer;
-            border-bottom: 2px solid transparent;
-            margin-bottom: -2px;
-            transition: all 0.2s;
-        }
-        .tab-btn.active {
-            color: var(--primary);
-            border-bottom-color: var(--primary);
-        }
-        .panel {
-            display: none;
-            flex: 1;
-            overflow-y: auto;
-            padding: 24px;
-        }
-        .panel.active { display: flex; flex-direction: column; }
-        #managePanel { gap: 16px; }
-        .manage-section {
-            background: var(--card-bg);
-            border-radius: var(--radius);
-            padding: 16px;
-            box-shadow: var(--shadow);
-        }
-        .manage-section h3 {
-            font-size: 15px;
-            margin-bottom: 12px;
-            color: var(--text);
-        }
-        .col-grid {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-        .col-tag {
-            padding: 4px 12px;
-            border-radius: 20px;
-            font-size: 13px;
-            cursor: pointer;
-            user-select: none;
-            border: 1px solid var(--border);
-            background: var(--bg);
-            transition: all 0.2s;
-        }
-        .col-tag.selected {
-            background: var(--primary);
-            color: #fff;
-            border-color: var(--primary);
-        }
-        .manage-section input {
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 8px 12px;
-            font-size: 14px;
-            font-family: inherit;
-            outline: none;
-            width: 100%;
-            margin-bottom: 8px;
-        }
-        .manage-section input:focus {
-            border-color: var(--primary-light);
-        }
-        .manage-section button {
-            background: var(--primary);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            padding: 8px 16px;
-            font-size: 14px;
-            cursor: pointer;
-        }
-        .manage-section button:hover { background: var(--primary-light); }
-        .binding-card {
-            background: var(--bg);
-            border-radius: 8px;
-            padding: 10px 14px;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            font-size: 13px;
-        }
-        .binding-card .del-btn {
-            background: #fef2f2;
-            color: #dc2626;
-            border: 1px solid #fecaca;
-            border-radius: 6px;
-            padding: 4px 10px;
-            font-size: 12px;
-            cursor: pointer;
         }
     </style>
 </head>
 <body>
 
-    <!-- ======== 顶部 ======== -->
     <div class="header">
         <span class="logo">  研途助手</span>
-        <span class="subtitle">考研伴学 Agent 测试页</span>
-        <span class="status">
-            <span class="status-dot"></span> 服务运行中
+        <span class="subtitle">考研伴学 Agent</span>
+        <span class="status" id="statusIndicator" title="点击检查">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">检测中...</span>
         </span>
+        <button class="new-chat-btn" onclick="newConversation()" title="开始新对话">+ 新对话</button>
     </div>
 
-        <!-- ======== Tab 栏 ======== -->
     <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab('chat')">💬 对话</button>
-        <button class="tab-btn" onclick="switchTab('manage')">📚 知识库管理</button>
+        <button class="tab-btn active" onclick="switchTab('chat')">  对话</button>
+        <button class="tab-btn" onclick="switchTab('manage')">  知识库管理</button>
     </div>
 
-
-    <!-- ======== 聊天区域 ======== -->
     <div class="chat-container" id="chatContainer">
         <div class="empty-state" id="emptyState">
             <div class="icon">  </div>
             <h2>你好！我是研途助手</h2>
-            <p>
-                我可以帮你解答考研知识点、分析真题、制定复习计划。<br>
-                先试试问我一个问题吧，比如"什么是矩阵的秩？"
-            </p>
+            <p>我可以帮你解答考研知识点、出练习题、制定复习计划。<br>试试问我"什么是拉格朗日中值定理？"</p>
         </div>
     </div>
 
-    <!-- ======== 知识库管理面板 ======== -->
     <div class="panel" id="managePanel">
-        <!-- 绑定创建 -->
         <div class="manage-section">
-            <h3>📎 创建教材-试卷绑定</h3>
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">
-                教材 Collection（勾选教材库）：
-            </p>
+            <h3>  创建教材-试卷绑定</h3>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">教材 Collection：</p>
             <div class="col-grid" id="textbookTags"></div>
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">
-                试卷 Collection（勾选真题库）：
-            </p>
+            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">试卷 Collection：</p>
             <div class="col-grid" id="examTags"></div>
             <input id="bindingLabel" placeholder="绑定标签（如：数学科目全套）" />
             <button onclick="createBinding()">创建绑定</button>
             <span id="bindMsg" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
         </div>
-
-        <!-- 绑定列表 -->
         <div class="manage-section">
-            <h3>📋 已有绑定关系</h3>
-            <div id="bindingList" style="font-size:13px;color:var(--text-muted);">
-                加载中...
-            </div>
+            <h3>  已有绑定关系</h3>
+            <div id="bindingList" style="font-size:13px;color:var(--text-muted);">加载中...</div>
         </div>
-
-        <!-- 上传区域 -->
         <div class="manage-section">
-            <h3>📤 上传文档</h3>
+            <h3>  上传文档</h3>
             <input type="file" id="uploadFile" accept=".pdf,.markdown,.txt" />
             <select id="uploadCollection" style="margin-left:8px;"></select>
             <button onclick="uploadDocument()" style="margin-left:8px;">上传入库</button>
@@ -422,18 +157,11 @@
         </div>
     </div>
 
-
-    <!-- ======== 输入栏 ======== -->
-    <div class="input-area">
+    <div class="input-area" id="inputArea">
         <select id="collectionSelect" title="选择知识库">
             <option value="default">默认知识库</option>
-            <!-- [TODO: 页面加载时通过 GET /api/documents 动态填充此下拉框] -->
         </select>
-        <textarea
-            id="messageInput"
-            rows="1"
-            placeholder="输入你的问题，按 Enter 发送，Shift+Enter 换行..."
-        ></textarea>
+        <textarea id="messageInput" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行..."></textarea>
         <button id="sendBtn" onclick="sendMessage()">发送</button>
     </div>
 
@@ -442,22 +170,86 @@
     // 全局状态
     // ============================================
     let isStreaming = false;
-    // 对话ID：页面加载时自动生成
-    let currentConversationId = 'conv_' + Math.random().toString(36).substring(2, 14);
-    // [缺陷] 全局变量管理简单，但没有做状态持久化。
-    // [后续扩展] 引入简单的状态管理对象，支持对话历史本地暂存。
-
+    let currentConversationId = newConversationId();
     const chatContainer = document.getElementById("chatContainer");
     const emptyState    = document.getElementById("emptyState");
     const messageInput  = document.getElementById("messageInput");
     const sendBtn       = document.getElementById("sendBtn");
     const collectionSel = document.getElementById("collectionSelect");
+    const statusDot     = document.getElementById("statusDot");
+    const statusText    = document.getElementById("statusText");
+
+    // ============================================
+    // 对话ID 管理
+    // ============================================
+    function newConversationId() {
+        return 'conv_' + Math.random().toString(36).substring(2, 14);
+    }
+    function newConversation() {
+        currentConversationId = newConversationId();
+        chatContainer.innerHTML = '';
+        chatContainer.appendChild(emptyState);
+        emptyState.style.display = '';
+        saveChatHistory();
+    }
+
+    // ============================================
+    // 状态持久化（localStorage）
+    // ============================================
+    function saveChatHistory() {
+        const messages = [];
+        chatContainer.querySelectorAll('.message').forEach(m => {
+            const role = m.classList.contains('user') ? 'user' : 'ai';
+            const bubble = m.querySelector('.bubble');
+            if (bubble && bubble.textContent) {
+                messages.push({ role, content: bubble.textContent });
+            }
+        });
+        localStorage.setItem('chat_backup_' + currentConversationId, JSON.stringify(messages));
+        localStorage.setItem('current_conv_id', currentConversationId);
+    }
+    function restoreChatHistory() {
+        const savedId = localStorage.getItem('current_conv_id');
+        if (savedId) {
+            currentConversationId = savedId;
+            const saved = localStorage.getItem('chat_backup_' + currentConversationId);
+            if (saved) {
+                try {
+                    const messages = JSON.parse(saved);
+                    if (messages.length > 0) {
+                        if (emptyState) emptyState.style.display = 'none';
+                        messages.forEach(m => appendMessage(m.role, m.content));
+                    }
+                } catch(e) {}
+            }
+        }
+    }
+
+    // ============================================
+    // 健康检查（真实检测后端连通性）
+    // ============================================
+    async function checkHealth() {
+        try {
+            const res = await fetch('/api/health', { signal: AbortSignal.timeout(5000) });
+            if (res.ok) {
+                statusDot.className = 'status-dot online';
+                statusText.textContent = '在线';
+                return;
+            }
+        } catch(e) {}
+        statusDot.className = 'status-dot offline';
+        statusText.textContent = '离线';
+    }
+    statusIndicator.addEventListener('click', async () => {
+        statusText.textContent = '检查中...';
+        await checkHealth();
+    });
+    setInterval(checkHealth, 30000);
+    checkHealth();
 
     // ============================================
     // 初始化
     // ============================================
-
-    // 页面加载时获取可用 Collection 列表
     async function loadCollections() {
         try {
             const res = await fetch("/api/documents");
@@ -474,25 +266,19 @@
                 opt.textContent = name;
                 collectionSel.appendChild(opt);
             });
-        } catch (err) {
-            console.warn("无法获取 Collection 列表:", err);
-            // [缺陷] 静默忽略，用户不知道加载失败。
-            // [后续扩展] 在下拉框旁显示警告图标。
+        } catch(err) {
+            console.warn("Collection 加载失败，稍后重试");
         }
     }
     loadCollections();
+    restoreChatHistory();
 
     // ============================================
-    // 键盘事件：Enter 发送，Shift+Enter 换行
+    // 键盘事件
     // ============================================
     messageInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
     });
-
-    // 自动调整输入框高度
     messageInput.addEventListener("input", () => {
         messageInput.style.height = "auto";
         messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + "px";
@@ -501,29 +287,22 @@
     // ============================================
     // 核心：发送消息并处理 SSE 流式响应
     // ============================================
-
     async function sendMessage() {
         const content = messageInput.value.trim();
         if (!content || isStreaming) return;
 
-        // 隐藏空状态提示
         if (emptyState) emptyState.style.display = "none";
-
-        // 1. 渲染用户消息气泡
         appendMessage("user", content);
-
-        // 2. 清空输入框
         messageInput.value = "";
         messageInput.style.height = "auto";
 
-        // 3. 创建 AI 占位气泡（流式填充）
         const aiBubble = appendMessage("ai", "", true);
-        // [缺陷] 如果流式过程报错，此气泡会残留为空。错误处理中已追加错误文本。
+        const aiMsgDiv = aiBubble.closest('.message');
 
-        // 4. 发起 POST SSE 请求
         isStreaming = true;
         sendBtn.disabled = true;
         messageInput.disabled = true;
+        let streamEndedNormally = false;
 
         try {
             const response = await fetch("/api/chat", {
@@ -537,58 +316,60 @@
             });
 
             if (!response.ok) {
-                // HTTP 错误（4xx, 5xx）
-                const errorData = await response.json().catch(() => ({}));
-                throw new Error(
-                    errorData.detail || `服务器错误 (${response.status})`
-                );
+                let detail = "服务器错误";
+                try {
+                    const errData = await response.json();
+                    // 过滤敏感信息：API Key 等
+                    detail = errData.detail || detail;
+                    if (detail.includes("sk-")) detail = "API 配置错误，请检查后端 .env 配置";
+                } catch(e) {}
+                throw new Error(detail + " (" + response.status + ")");
             }
 
-            // 5. 读取 SSE 流
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
-            let buffer = "";  // 用于处理不完整的 SSE 帧
+            let buffer = "";
+            let rawTokens = [];
 
             while (true) {
                 const { done, value } = await reader.read();
                 if (done) break;
-
                 buffer += decoder.decode(value, { stream: true });
-
-                // 解析 SSE 帧：按 \n\n 分割
                 const lines = buffer.split("\n\n");
-                // 最后一段可能不完整，留到下次循环
                 buffer = lines.pop() || "";
 
                 for (const line of lines) {
                     if (!line.startsWith("data: ")) continue;
-                    const payload = line.slice(6); // 去掉 "data: " 前缀
-
+                    const payload = line.slice(6);
                     if (payload === "[DONE]") {
-                        // 流结束
+                        streamEndedNormally = true;
                         break;
                     }
-
-                    // 追加 token 到气泡
+                    rawTokens.push(payload);
                     aiBubble.textContent += payload;
-                    // 自动滚动到底部
                     chatContainer.scrollTop = chatContainer.scrollHeight;
                 }
             }
-            // 流结束，移除闪烁光标效果
-            aiBubble.classList.remove("streaming");
-            // [缺陷] 如果 SSE 流没有以 [DONE] 结尾就中断，
-            //   streaming 类不会被移除，光标一直闪烁。
-            // [后续扩展] 在 finally 块中统一移除。
 
-        } catch (err) {
+            // 流结束后渲染 LaTeX + Markdown
+            aiBubble.classList.remove("streaming");
+            if (rawTokens.length > 0) {
+                const fullText = rawTokens.join("");
+                aiBubble.innerHTML = renderContent(fullText);
+            }
+            saveChatHistory();
+
+        } catch(err) {
             console.error("对话请求失败:", err);
             aiBubble.classList.remove("streaming");
             aiBubble.classList.add("error");
-            aiBubble.textContent = `❌ 请求失败: ${err.message}`;
-            // [缺陷] 错误信息直接暴露给用户，可能包含敏感内部信息（如 API Key 错误）。
-            // [后续扩展] 对错误消息做脱敏处理。
+            const errorMsg = err.message || "网络请求失败，请检查服务是否启动";
+            aiBubble.innerHTML = '❌ 请求失败: ' + escapeHtml(errorMsg)
+                + '<br><button onclick="retryLastMessage()">🔄 重试</button>';
         } finally {
+            if (!streamEndedNormally) {
+                aiBubble.classList.remove("streaming");
+            }
             isStreaming = false;
             sendBtn.disabled = false;
             messageInput.disabled = false;
@@ -597,44 +378,109 @@
     }
 
     // ============================================
-    // DOM 工具：添加消息气泡
+    // 重试最后一条消息
     // ============================================
+    function retryLastMessage() {
+        const lastUserMsg = chatContainer.querySelector('.message.user:last-of-type .bubble');
+        if (lastUserMsg) {
+            const lastAiBubble = chatContainer.querySelector('.message.ai:last-of-type .bubble');
+            if (lastAiBubble) lastAiBubble.closest('.message').remove();
+            messageInput.value = lastUserMsg.textContent;
+            sendMessage();
+        }
+    }
 
-    /**
-     * 在聊天区域添加一个消息气泡。
-     *
-     * @param {string} role      - "user" 或 "ai"
-     * @param {string} text      - 初始文本内容
-     * @param {boolean} streaming - 是否为流式气泡（光标闪烁效果）
-     * @returns {HTMLElement} 气泡的 DOM 元素引用（用于后续流式追加文本）
-     */
+    // ============================================
+    // LaTeX + Markdown 渲染
+    // ============================================
+    function renderContent(text) {
+        // 步骤1: 保护代码块（marked 和 KaTeX 不处理内部内容）
+        const codeBlocks = [];
+        let processed = text.replace(/```[\s\S]*?```/g, (match) => {
+            codeBlocks.push(match);
+            return `%%CODEBLOCK_${codeBlocks.length - 1}%%`;
+        });
+
+        // 步骤2: 保护 $$...$$ 独立公式（KaTeX 显示模式）
+        const displayMath = [];
+        processed = processed.replace(/\$\$([\s\S]*?)\$\$/g, (_, formula) => {
+            displayMath.push(formula.trim());
+            return `%%DISPLAYMATH_${displayMath.length - 1}%%`;
+        });
+
+        // 步骤3: 保护 $...$ 内联公式
+        const inlineMath = [];
+        processed = processed.replace(/\$(.+?)\$/g, (_, formula) => {
+            inlineMath.push(formula.trim());
+            return `%%INLINEMATH_${inlineMath.length - 1}%%`;
+        });
+
+        // 步骤4: 先渲染 Markdown
+        marked.setOptions({ breaks: true, gfm: true });
+        let html = marked.parse(processed);
+
+        // 步骤5: 还原并渲染独立公式
+        displayMath.forEach((formula, i) => {
+            try {
+                const rendered = katex.renderToString(formula, { displayMode: true, throwOnError: false });
+                html = html.replace(`%%DISPLAYMATH_${i}%%`, rendered);
+            } catch(e) {
+                html = html.replace(`%%DISPLAYMATH_${i}%%`, `<code>$${escapeHtml(formula)}$</code>`);
+            }
+        });
+
+        // 步骤6: 还原并渲染内联公式
+        inlineMath.forEach((formula, i) => {
+            try {
+                const rendered = katex.renderToString(formula, { displayMode: false, throwOnError: false });
+                html = html.replace(`%%INLINEMATH_${i}%%`, rendered);
+            } catch(e) {
+                html = html.replace(`%%INLINEMATH_${i}%%`, `<code>$${escapeHtml(formula)}$</code>`);
+            }
+        });
+
+        // 步骤7: 还原代码块
+        codeBlocks.forEach((block, i) => {
+            const langMatch = block.match(/```(\w*)/);
+            const lang = langMatch ? langMatch[1] : '';
+            const code = block.replace(/```\w*\n?/, "").replace(/```$/, "");
+            const escaped = escapeHtml(code);
+            html = html.replace(
+                `%%CODEBLOCK_${i}%%`,
+                `<pre><code class="language-${lang}">${escaped}</code></pre>`
+            );
+        });
+
+        return html;
+    }
+
+    function escapeHtml(str) {
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+    }
+
+    // ============================================
+    // 消息气泡
+    // ============================================
     function appendMessage(role, text, streaming = false) {
         const wrapper = document.createElement("div");
         wrapper.className = `message ${role}`;
-
-        // 头像
         const avatar = document.createElement("div");
         avatar.className = "avatar";
         avatar.textContent = role === "user" ? "我" : "AI";
-
-        // 气泡
         const bubble = document.createElement("div");
         bubble.className = "bubble";
         bubble.textContent = text;
         if (streaming) bubble.classList.add("streaming");
-        // [缺陷] 在流式追加文本时，textContent 会触发浏览器重新解析，
-        //   如果 LLM 返回了 HTML 标签（如 <script>），不会被执行（安全），
-        //   但也不会渲染为富文本。后续若有 LaTeX 公式渲染需求（如 KaTeX），
-        //   需要改成 innerHTML + 沙箱过滤，或等待流结束后统一渲染。
-
         wrapper.appendChild(avatar);
         wrapper.appendChild(bubble);
         chatContainer.appendChild(wrapper);
         chatContainer.scrollTop = chatContainer.scrollHeight;
-
         return bubble;
     }
-        // ============================================
+
+    // ============================================
     // Tab 切换
     // ============================================
     function switchTab(name) {
@@ -642,23 +488,18 @@
         document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
         if (name === 'chat') {
             document.querySelector('.tab-btn:first-child').classList.add('active');
-            document.getElementById('chatContainer').classList.add('active');
             document.getElementById('chatContainer').style.display = 'flex';
-            document.getElementById('emptyState').style.display = '';
-            document.querySelector('.input-area').style.display = 'flex';
+            document.getElementById('inputArea').style.display = 'flex';
             document.getElementById('managePanel').classList.remove('active');
         } else {
             document.querySelector('.tab-btn:last-child').classList.add('active');
             document.getElementById('managePanel').classList.add('active');
             document.getElementById('chatContainer').style.display = 'none';
-            document.querySelector('.input-area').style.display = 'none';
+            document.getElementById('inputArea').style.display = 'none';
             refreshManagePanel();
         }
     }
 
-    // ============================================
-    // 管理面板刷新
-    // ============================================
     let _allCollections = [];
     let _selectedTextbooks = new Set();
     let _selectedExams = new Set();
@@ -676,15 +517,13 @@
             _allCollections = data.collections || [];
             renderColTags('textbookTags', _allCollections, _selectedTextbooks, 'textbook');
             renderColTags('examTags', _allCollections, _selectedExams, 'exam');
-        } catch (e) {
-            console.warn('加载 Collections 失败', e);
-        }
+        } catch(e) { console.warn('加载 Collections 失败', e); }
     }
 
     function renderColTags(containerId, items, selectedSet, role) {
         const container = document.getElementById(containerId);
         if (!items.length) {
-            container.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">（暂无 Collection，请先上传文档）</span>';
+            container.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">（暂无 Collection）</span>';
             return;
         }
         container.innerHTML = items.map(name => {
@@ -696,17 +535,9 @@
     function toggleCol(role, name) {
         const set = role === 'textbook' ? _selectedTextbooks : _selectedExams;
         if (set.has(name)) set.delete(name); else set.add(name);
-        renderColTags(
-            role === 'textbook' ? 'textbookTags' : 'examTags',
-            _allCollections,
-            set,
-            role
-        );
+        renderColTags(role === 'textbook' ? 'textbookTags' : 'examTags', _allCollections, set, role);
     }
 
-    // ============================================
-    // 绑定 CRUD
-    // ============================================
     async function createBinding() {
         const label = document.getElementById('bindingLabel').value.trim() || '';
         const textbooks = [..._selectedTextbooks];
@@ -717,19 +548,15 @@
         }
         try {
             const res = await fetch('/api/collections/bind', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                method: 'POST', headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({textbook_collections: textbooks, exam_collections: exams, label}),
             });
             if (!res.ok) throw new Error((await res.json()).detail);
             document.getElementById('bindMsg').textContent = '✅ 绑定创建成功';
             _selectedTextbooks.clear(); _selectedExams.clear();
             document.getElementById('bindingLabel').value = '';
-            loadCollectionsForManage();
-            loadBindings();
-        } catch(e) {
-            document.getElementById('bindMsg').textContent = '❌ ' + e.message;
-        }
+            loadCollectionsForManage(); loadBindings();
+        } catch(e) { document.getElementById('bindMsg').textContent = '❌ ' + e.message; }
     }
 
     async function loadBindings() {
@@ -737,36 +564,23 @@
             const res = await fetch('/api/collections/bindings');
             const data = await res.json();
             if (!data.length) {
-                document.getElementById('bindingList').innerHTML = '（暂无绑定，请创建教材与试卷的关联）';
+                document.getElementById('bindingList').innerHTML = '（暂无绑定）';
                 return;
             }
             document.getElementById('bindingList').innerHTML = data.map(b => `
                 <div class="binding-card">
-                    <span>
-                        <strong>${b.label}</strong>
-                        &nbsp;教材: [${b.textbook_collections.join(', ')}]
-                        ↔ 试卷: [${b.exam_collections.join(', ')}]
-                    </span>
+                    <span><strong>${b.label}</strong> 教材:[${b.textbook_collections.join(', ')}] ↔ 试卷:[${b.exam_collections.join(', ')}]</span>
                     <button class="del-btn" onclick="deleteBinding('${b.id}')">删除</button>
                 </div>
             `).join('');
-        } catch(e) {
-            document.getElementById('bindingList').innerHTML = '加载失败: ' + e.message;
-        }
+        } catch(e) { document.getElementById('bindingList').innerHTML = '加载失败: ' + e.message; }
     }
 
     async function deleteBinding(id) {
-        try {
-            await fetch(`/api/collections/bindings/${id}`, {method: 'DELETE'});
-            loadBindings();
-        } catch(e) {
-            alert('删除失败: ' + e.message);
-        }
+        try { await fetch(`/api/collections/bindings/${id}`, {method: 'DELETE'}); loadBindings(); }
+        catch(e) { alert('删除失败: ' + e.message); }
     }
 
-    // ============================================
-    // 管理面板上传
-    // ============================================
     async function loadUploadCollectionOptions() {
         try {
             const res = await fetch('/api/documents');
@@ -780,10 +594,7 @@
     async function uploadDocument() {
         const fileInput = document.getElementById('uploadFile');
         const file = fileInput.files[0];
-        if (!file) {
-            document.getElementById('uploadMsg').textContent = '请先选择文件';
-            return;
-        }
+        if (!file) { document.getElementById('uploadMsg').textContent = '请先选择文件'; return; }
         const formData = new FormData();
         formData.append('file', file);
         formData.append('collection_name', document.getElementById('uploadCollection').value);
@@ -791,36 +602,12 @@
             const res = await fetch('/api/documents/upload', {method: 'POST', body: formData});
             if (!res.ok) throw new Error((await res.json()).detail);
             const data = await res.json();
-            document.getElementById('uploadMsg').textContent =
-                `✅ ${data.filename} → ${data.collection_name}，入库 ${data.chunk_count} 块`;
+            document.getElementById('uploadMsg').textContent = `✅ ${data.filename} → ${data.collection_name}，${data.chunk_count} 块`;
             fileInput.value = '';
             loadCollectionsForManage();
-            loadCollectionSelections();
-        } catch(e) {
-            document.getElementById('uploadMsg').textContent = '❌ ' + e.message;
-        }
+            loadCollections();
+        } catch(e) { document.getElementById('uploadMsg').textContent = '❌ ' + e.message; }
     }
-
-    // 同步更新对话页面的 Collection 下拉框
-    async function loadCollectionSelections() {
-        try {
-            const res = await fetch('/api/documents');
-            const data = await res.json();
-            const sel = document.getElementById('collectionSelect');
-            if (!data.collections.length) {
-                sel.innerHTML = '<option value="default">默认知识库</option>';
-                return;
-            }
-            sel.innerHTML = data.collections.map(n => `<option value="${n}">${n}</option>`).join('');
-        } catch(e) {}
-    }
-
-
-    // [缺陷] 整个页面没有做 LaTeX 公式渲染。
-    //   考研数学内容中 $...$ 和 $$...$$ 会以原始文本显示。
-    // [后续扩展] 引入 KaTeX 或 MathJax CDN，在流式结束后统一渲染公式。
-    // [后续扩展] 添加 Markdown 渲染（marked.js），支持标题、列表、代码块等。
-    // [后续扩展] 添加对话历史导出功能（下载为 Markdown 或 PDF）。
     </script>
 </body>
 </html>

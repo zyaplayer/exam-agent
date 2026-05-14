@@ -180,19 +180,22 @@ async def _extract_student_info(message: str) -> dict:
             "additional_notes": 其他备注或 null
         }
     """
-    llm = get_llm(provider="deepseek", temperature=0.1, streaming=False)
+    try:
+        llm = get_llm(provider="deepseek", temperature=0.1, streaming=False)
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = [
+            SystemMessage(content=PLANNER_EXTRACT_SYSTEM_PROMPT),
+            HumanMessage(content=PLANNER_EXTRACT_USER_TEMPLATE.format(message=message)),
+        ]
+        response = llm.invoke(messages)
+        raw = response.content.strip()
+    except Exception:
+        return {
+            "target_school": None, "target_major": None, "exam_date": None,
+            "weak_subjects": [], "strong_subjects": [],
+            "available_hours_per_day": None, "additional_notes": message,
+        }
 
-    from langchain_core.messages import SystemMessage, HumanMessage
-
-    messages = [
-        SystemMessage(content=PLANNER_EXTRACT_SYSTEM_PROMPT),
-        HumanMessage(
-            content=PLANNER_EXTRACT_USER_TEMPLATE.format(message=message)
-        ),
-    ]
-
-    response = llm.invoke(messages)
-    raw = response.content.strip()
 
     # 尝试从响应中提取 JSON（可能被包裹在 markdown 代码块中）
     json_match = re.search(r"\{[\s\S]*\}", raw)
@@ -277,9 +280,24 @@ async def generate_plan_stream(
             phase_dates = get_phase_dates(remaining_days)
 
     # ---- 步骤4: 根据模式调用 LLM ----
-    llm = get_llm(provider="deepseek", temperature=0.5, streaming=True)
-
-    from langchain_core.messages import SystemMessage, HumanMessage
+    try:
+        llm = get_llm(provider="deepseek", temperature=0.5, streaming=True)
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                yield chunk.content
+    except Exception as e:
+        error_msg = str(e)
+        if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            yield "⚠️ API Key 未配置或已失效，请在 .env 中设置。"
+        elif "timeout" in error_msg.lower():
+            yield "⚠️ API 响应超时，请稍后重试。"
+        else:
+            yield f"⚠️ AI 服务暂时不可用。（{error_msg[:60]}）"
 
     # 注入对话历史
     from app.services.conversation_service import format_history_for_prompt

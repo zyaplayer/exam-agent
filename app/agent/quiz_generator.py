@@ -293,9 +293,25 @@ async def generate_simple_quiz_stream(
         )
 
     # 步骤4: LLM 生成题目（流式）
-    llm = get_llm(provider="deepseek", temperature=0.3, streaming=True)
+    try:
+        llm = get_llm(provider="deepseek", temperature=0.3, streaming=True)
+        from langchain_core.messages import SystemMessage, HumanMessage
+        messages = [
+            SystemMessage(content=QUIZ_SIMPLE_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                yield chunk.content
+    except Exception as e:
+        error_msg = str(e)
+        if "api_key" in error_msg.lower():
+            yield "⚠️ API Key 未配置或已失效。"
+        elif "timeout" in error_msg.lower():
+            yield "⚠️ API 响应超时，请稍后重试。"
+        else:
+            yield f"⚠️ AI 服务暂时不可用。（{error_msg[:60]}）"
 
-    from langchain_core.messages import SystemMessage, HumanMessage
 
     # 先输出参数摘要
     yield f"## 出题参数\n"
@@ -409,37 +425,48 @@ async def generate_exam_quiz_stream(
     params = _parse_exam_params(message)
 
     # 步骤5: LLM 生成试卷（流式）
-    llm = get_llm(provider="deepseek", temperature=0.4, streaming=True)
+    # 步骤5: LLM 生成试卷（流式）
+    try:
+        llm = get_llm(provider="deepseek", temperature=0.4, streaming=True)
 
-    from langchain_core.messages import SystemMessage, HumanMessage
+        from langchain_core.messages import SystemMessage, HumanMessage
 
-    # 先输出摘要
-    yield f"## 试卷生成参数\n"
-    yield f"- 科目: {params['subject']}\n"
-    yield f"- 难度: {params['difficulty']}\n"
-    yield f"- 参考模板: {', '.join(exam_collections) if exam_collections else '无'}\n"
-    yield f"- 教材来源: {', '.join(textbook_collections)}\n\n"
-    yield "---\n\n"
+        # 先输出摘要
+        yield f"## 试卷生成参数\n"
+        yield f"- 科目: {params['subject']}\n"
+        yield f"- 难度: {params['difficulty']}\n"
+        yield f"- 参考模板: {', '.join(exam_collections) if exam_collections else '无'}\n"
+        yield f"- 教材来源: {', '.join(textbook_collections)}\n\n"
+        yield "---\n\n"
 
-    user_prompt = QUIZ_EXAM_USER_TEMPLATE.format(
-        subject=params["subject"],
-        difficulty=params["difficulty"],
-        include_choice=params["include_choice"],
-        include_fill=params["include_fill"],
-        include_calc=params["include_calc"],
-        include_proof=params["include_proof"],
-        exam_format=exam_format_text,
-        knowledge_scope=knowledge_scope,
-    )
+        user_prompt = QUIZ_EXAM_USER_TEMPLATE.format(
+            subject=params["subject"],
+            difficulty=params["difficulty"],
+            include_choice=params["include_choice"],
+            include_fill=params["include_fill"],
+            include_calc=params["include_calc"],
+            include_proof=params["include_proof"],
+            exam_format=exam_format_text,
+            knowledge_scope=knowledge_scope,
+        )
 
-    messages = [
-        SystemMessage(content=QUIZ_EXAM_SYSTEM_PROMPT),
-        HumanMessage(content=user_prompt),
-    ]
+        messages = [
+            SystemMessage(content=QUIZ_EXAM_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
 
-    async for chunk in llm.astream(messages):
-        if chunk.content:
-            yield chunk.content
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                yield chunk.content
+    except Exception as e:
+        error_msg = str(e)
+        if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            yield "⚠️ API Key 未配置或已失效，请在 .env 中设置。"
+        elif "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            yield "⚠️ API 响应超时，请稍后重试。"
+        else:
+            yield f"⚠️ AI 服务暂时不可用。（{error_msg[:60]}）"
+
 
 
 def _parse_exam_params(message: str) -> dict:
@@ -534,23 +561,32 @@ async def quiz_consult_stream(
     else:
         context = "（本题使用通识知识回答，不强制参考教材库）"
 
-    llm = get_llm(provider="deepseek", temperature=0.7, streaming=True)
+    try:
+        llm = get_llm(provider="deepseek", temperature=0.7, streaming=True)
 
-    from langchain_core.messages import SystemMessage, HumanMessage
+        from langchain_core.messages import SystemMessage, HumanMessage
 
-    user_prompt = QA_USER_PROMPT_TEMPLATE.format(
-        question=question,
-        context=context,
-    )
+        user_prompt = QA_USER_PROMPT_TEMPLATE.format(
+            question=question,
+            context=context,
+        )
 
-    messages = [
-        SystemMessage(content=QA_SYSTEM_PROMPT),
-        HumanMessage(content=user_prompt),
-    ]
+        messages = [
+            SystemMessage(content=QA_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
 
-    async for chunk in llm.astream(messages):
-        if chunk.content:
-            yield chunk.content
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                yield chunk.content
+    except Exception as e:
+        error_msg = str(e)
+        if "api_key" in error_msg.lower():
+            yield "⚠️ API Key 未配置或已失效。"
+        elif "timeout" in error_msg.lower():
+            yield "⚠️ API 响应超时，请稍后重试。"
+        else:
+            yield f"⚠️ AI 服务暂时不可用。（{error_msg[:60]}）"
 
 
 # ============================================

@@ -11,7 +11,7 @@ from langchain_core.documents import Document
 
 from app.core.config import settings
 from app.core.llm_manager import get_llm
-from app.services.vector_store import search_documents
+from app.services.vector_store import hybrid_search as search_documents
 from app.agent.prompts import QA_SYSTEM_PROMPT, QA_USER_PROMPT_TEMPLATE
 
 
@@ -57,7 +57,8 @@ def _format_retrieved_context(docs: List[Document]) -> str:
         if hierarchy:
             location += f", 章节: {hierarchy}"
 
-        parts.append(f"【片段 {i}】（{location}）\n{doc.page_content}")
+            parts.append(f"【片段 [编号{i}]】（{location}）\n{doc.page_content}")
+
 
 
     return "\n\n".join(parts)
@@ -114,35 +115,33 @@ def ask_question(
     context = _format_retrieved_context(retrieved_docs)
 
 
-    # 步骤4: 组装 Prompt（注入对话历史）
-    from app.services.conversation_service import format_history_for_prompt
-    conversation_history = format_history_for_prompt(conversation_id) if conversation_id else ""
-
+    # 步骤4: 组装 Prompt
     user_prompt = QA_USER_PROMPT_TEMPLATE.format(
         question=question,
         context=context,
-        conversation_history=conversation_history,
     )
 
     # 步骤5: 调用 LLM
-    llm = get_llm(provider="deepseek", temperature=temperature, streaming=False)
+    try:
+        llm = get_llm(provider="deepseek", temperature=temperature, streaming=False)
 
-    # LangChain ChatOpenAI 的消息格式
-    from langchain_core.messages import SystemMessage, HumanMessage
+        from langchain_core.messages import SystemMessage, HumanMessage
 
-    messages = [
-        SystemMessage(content=QA_SYSTEM_PROMPT),
-        HumanMessage(content=user_prompt),
-    ]
+        messages = [
+            SystemMessage(content=QA_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
 
-    response = llm.invoke(messages)
+        response = llm.invoke(messages)
+        return response.content
+    except Exception as e:
+        error_msg = str(e)
+        if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            return "⚠️ API Key 未配置或已失效，请在 .env 中设置正确的 DEEPSEEK_API_KEY。"
+        if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            return "⚠️ DeepSeek API 响应超时，请稍后重试。"
+        return f"⚠️ AI 服务暂时不可用，请稍后重试。（错误: {error_msg[:80]}）"
 
-    # [缺陷] llm.invoke 返回 AIMessage，其 .content 就是生成的文本。
-    #   但如果 future 切换为非 LangChain 模型（如直接调 openai SDK），
-    #   此处代码需全部重写。
-    # [后续扩展] 在 llm_manager 中封装统一的 invoke 接口，解耦 LangChain 依赖。
-
-    return response.content
 
 
 # ============================================
@@ -204,35 +203,43 @@ async def ask_question_stream(
     context = _format_retrieved_context(retrieved_docs)
 
 
-    # 步骤4: 组装 Prompt（注入对话历史）
+        # 步骤4: 组装 Prompt（注入对话历史 + Token 截断保护）
     from app.services.conversation_service import format_history_for_prompt
+    from app.utils.token_counter import check_and_truncate
     conversation_history = format_history_for_prompt(conversation_id) if conversation_id else ""
 
-    user_prompt = QA_USER_PROMPT_TEMPLATE.format(
-        question=question,
-        context=context,
+    user_prompt = check_and_truncate(
+        system_prompt=QA_SYSTEM_PROMPT,
+        user_prompt_template=QA_USER_PROMPT_TEMPLATE,
+        docs=retrieved_docs,
         conversation_history=conversation_history,
+        question=question,
     )
 
+
     # 步骤5: 调用流式 LLM
-    llm = get_llm(provider="deepseek", temperature=temperature, streaming=True)
+    try:
+        llm = get_llm(provider="deepseek", temperature=temperature, streaming=True)
 
-    from langchain_core.messages import SystemMessage, HumanMessage
+        from langchain_core.messages import SystemMessage, HumanMessage
 
-    messages = [
-        SystemMessage(content=QA_SYSTEM_PROMPT),
-        HumanMessage(content=user_prompt),
-    ]
+        messages = [
+            SystemMessage(content=QA_SYSTEM_PROMPT),
+            HumanMessage(content=user_prompt),
+        ]
 
-    # [缺陷] 检索是同步的，阻塞了整个协程。
-    #   如果 ChromaDB 检索耗时较长（如 Collection 很大），会造成明显延迟。
-    # [后续扩展] 将 search_documents 改为 async，或在线程池中执行。
-    # [后续扩展] 先 yield 一个"正在检索知识库..."的状态消息给前端。
+        async for chunk in llm.astream(messages):
+            if chunk.content:
+                yield chunk.content
+    except Exception as e:
+        error_msg = str(e)
+        if "api_key" in error_msg.lower() or "unauthorized" in error_msg.lower():
+            yield "⚠️ API Key 未配置或已失效，请在 .env 中设置正确的 DEEPSEEK_API_KEY。"
+        elif "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            yield "⚠️ DeepSeek API 响应超时，请稍后重试。"
+        else:
+            yield f"⚠️ AI 服务暂时不可用，请稍后重试。（{error_msg[:60]}）"
 
-    async for chunk in llm.astream(messages):
-        # chunk.content 是当前增量 token
-        if chunk.content:
-            yield chunk.content
 
     # [缺陷] 流式结束后没有额外处理（如保存对话记录到日志/数据库）。
     # [后续扩展] 在 finally 块中记录完整问答到对话历史。

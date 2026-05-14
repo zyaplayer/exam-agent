@@ -78,6 +78,7 @@ class Settings(BaseSettings):
     # ============================================
     RETRIEVAL_K: int = 4          # 向量检索返回的最相关文档数
     RETRIEVAL_THRESHOLD: float = 0.0  # 相似度阈值（0 表示不过滤）
+    MAX_CONTEXT_TOKENS: int = 8000  # Prompt 最大 token 数（超出时自动截断）
 
     # 多轮对话历史保留的最大轮数（一轮 = 1 问 + 1 答）
     MAX_CONVERSATION_TURNS: int = 10
