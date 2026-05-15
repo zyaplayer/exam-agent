@@ -252,7 +252,7 @@ async def upload_document(
     """上传文档 → 解析 → 切分 → 向量化 → 入库"""
     filename = file.filename or "unknown"
     suffix = Path(filename).suffix.lower()
-    allowed = {".pdf", ".markdown", ".txt"}
+    allowed = {".pdf", ".markdown", ".txt", ".docx"}
     if suffix not in allowed:
         raise HTTPException(
             status_code=400,

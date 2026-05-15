@@ -31,7 +31,7 @@ def load_document(file_path: str) -> List[Document]:
     根据文件后缀自动选择合适的加载器，将文件加载为 LangChain Document 列表。
 
     参数:
-        file_path: 文件路径（支持 .pdf / .markdown / .txt）
+        file_path: 文件路径（支持 .pdf / .markdown / .txt / .docx）
 
     返回:
         List[Document] —— 每个 Document 的 page_content 为提取后的文本
@@ -71,6 +71,20 @@ def load_document(file_path: str) -> List[Document]:
         for doc in docs:
             doc.metadata["source"] = str(path)
         return docs
+
+    elif suffix == ".docx":
+        # [注] 需要安装 python-docx: pip install python-docx
+        try:
+            from langchain_community.document_loaders import Docx2txtLoader
+            loader = Docx2txtLoader(str(path))
+            docs = loader.load()
+            for doc in docs:
+                doc.metadata["source"] = str(path)
+            return docs
+        except ImportError:
+            raise ImportError(
+                "处理 .docx 文件需要安装 python-docx，请运行: pip install python-docx"
+            )
 
     else:
         raise ValueError(
@@ -229,8 +243,19 @@ def process_document(file_path: str) -> List[Document]:
 
     返回:
         已切分的 Document 列表，可直接送入向量库
+
+    异常:
+        RuntimeError: 文件为空或未提取到有效内容
     """
     docs = load_document(file_path)
+
+    # 空文件检测
+    if not docs:
+        raise RuntimeError(f"文档解析结果为空: {file_path}，请检查文件是否损坏或为空")
+    all_empty = all(not d.page_content.strip() for d in docs)
+    if all_empty:
+        raise RuntimeError(f"文档 '{Path(file_path).name}' 未提取到有效文本内容，可能为扫描版PDF或空文件")
+
     return split_by_markdown_headers(docs)
 
 
