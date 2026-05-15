@@ -38,18 +38,30 @@ async def lifespan(app: FastAPI):
     for d in dirs_to_create:
         d.mkdir(parents=True, exist_ok=True)
 
+    # 启动预检：API Key 是否已配置
+    if not settings.DEEPSEEK_API_KEY or settings.DEEPSEEK_API_KEY.startswith("sk-your-"):
+        print("[警告] DEEPSEEK_API_KEY 未配置或仍为占位值，LLM 调用将失败")
+    else:
+        print(f"[启动] DeepSeek API Key 已配置 ({settings.DEEPSEEK_API_KEY[:8]}...)")
+
     print(f"[启动] {settings.PROJECT_NAME} v{settings.PROJECT_VERSION}")
     print(f"[启动] 文档上传目录: {settings.RAW_DOCS_DIR}")
     print(f"[启动] 向量库目录:   {settings.CHROMA_PERSIST_DIR}")
-    # [缺陷] 启动时不检查 API Key 是否已配置，等到第一次请求才报错。
-    # [后续扩展] 在 startup 中做预检：验证 API Key 有效、ChromaDB 可连接。
 
     yield  # ← 应用运行期间停在此处
 
     # ---- 关闭逻辑 ----
     print(f"[关闭] {settings.PROJECT_NAME} 已停止")
-    # [缺陷] ChromaDB 客户端没有显式 close，可能导致部分数据未刷盘。
-    # [后续扩展] 在此处调用 ChromaDB PersistentClient 的 close 方法。
+    # 清理 ChromaDB 客户端
+    try:
+        from app.services.vector_store import _chroma_clients
+        for path_key, client in list(_chroma_clients.items()):
+            try:
+                del _chroma_clients[path_key]
+            except Exception:
+                pass
+    except Exception:
+        pass
 
 
 # ============================================

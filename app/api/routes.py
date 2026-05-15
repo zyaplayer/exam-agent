@@ -7,6 +7,7 @@
 
 import os
 import shutil
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -246,8 +247,7 @@ async def quiz_exam(req: ExamQuizRequest):
 )
 async def upload_document(
     file: UploadFile = File(...),
-        collection_name: str = Form("default"),
-
+    collection_name: str = Form("default"),
 ):
     """上传文档 → 解析 → 切分 → 向量化 → 入库"""
     filename = file.filename or "unknown"
@@ -262,11 +262,24 @@ async def upload_document(
     raw_docs_dir = settings.BASE_DIR / settings.RAW_DOCS_DIR.lstrip("./")
     raw_docs_dir.mkdir(parents=True, exist_ok=True)
 
-    save_path = raw_docs_dir / filename
+    # 同名文件加时间戳防覆盖
+    stem = Path(filename).stem
+    save_path = raw_docs_dir / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+
+    # 文件大小限制: 100MB
+    max_size = 100 * 1024 * 1024
+    total_size = 0
     try:
         with open(save_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):
+                total_size += len(chunk)
+                if total_size > max_size:
+                    f.close()
+                    save_path.unlink()
+                    raise HTTPException(status_code=413, detail="文件过大，单次上传不得超过 100MB")
                 f.write(chunk)
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
 

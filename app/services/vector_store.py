@@ -9,9 +9,6 @@ import chromadb
 from pathlib import Path
 from typing import List, Optional
 
-from pathlib import Path
-from typing import List, Optional
-
 from langchain_core.documents import Document
 from langchain_chroma import Chroma
 from chromadb.config import Settings as ChromaSettings
@@ -452,35 +449,19 @@ def ingest_document(
 
 
 # ============================================
-# 当前代码缺陷总结 (2025-05-09)
+# ============================================
+# 当前代码缺陷总结（更新于 2026-05-15）
 # ============================================
 #
-# 1. 【无连接池 / 连接复用】
-#    - 每次调用 get_vector_store 都重新初始化 Chroma 客户端连接。
-#    - 高并发场景下性能差，且可能触发文件锁冲突。
-#    - 后续拆分方向：单例 Chroma 客户端 + 线程安全的 Collection 缓存。
+# ✅ 已修复:
+#   1. 连接单例 — _get_persistent_client() 全局共享
+#   2. 去重 — SHA256 哈希过滤
+#   3. 分数过滤 — similarity_search_with_score + RETRIEVAL_THRESHOLD
+#   4. 数据校验 — routes.py 100MB 限制
+#   7. 中文名称 — _sanitize_collection_name()
 #
-# 2. 【入库无去重】
-#    - 同一份文档重复上传会产生冗余向量块，浪费磁盘并降低检索精度。
-#    - 后续应在 add_documents 前按 (source, page, chunk_hash) 过滤已有记录。
-#
-# 3. 【检索无分数过滤】
-#    - 当前使用 similarity_search，不返回相似度分数。
-#    - 无法滤除低相关度的噪声结果（如相似度 < 0.5 的块）。
-#    - 后续改用 similarity_search_with_score + RETRIEVAL_THRESHOLD。
-#
-# 4. 【Embedding Provider 硬编码】
-#    - _get_embedding_function 写死了 "deepseek"，无法在 Collection 级别切换。
-#    - 后续应支持每个 Collection 绑定不同 embedding provider。
-#
-# 5. 【无批量入库优化】
-#    - 大批量文档依次入库，没有并发/批处理。
-#    - ChromaDB 支持 batch add，后续可加入分批次 + 进度回调。
-#
-# 6. 【不支持文档删除 / 更新】
-#    - 只能整库删除，无法按 source 删除单份文档的向量。
-#    - 后续应提供 delete_by_source() 和 update_document() 方法。
-#
-# 7. 【缺少数据校验】
-#    - ingest_document 对 PDF 页数、文件大小没有上限检查。
-#    - 后续应加入文件大小限制 + 空文件检测。
+# ⬜ 待修复:
+#   1. Embedding Provider 目前仅支持 BGE 本地模型，未支持切换
+#   2. 大批量入库无批处理优化
+#   3. 不支持按 source 删除/更新单个文档
+#   4. 混合检索对小 Collection（<100个文档）的 BM25 有效，大量文档时需要性能优化
