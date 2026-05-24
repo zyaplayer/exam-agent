@@ -14,16 +14,67 @@
 
     <style>
         :root {
-            --primary: #4f46e5; --primary-light: #818cf8; --bg: #f8fafc;
-            --card-bg: #ffffff; --text: #1e293b; --text-muted: #64748b;
-            --border: #e2e8f0; --bubble-user: #4f46e5; --bubble-ai: #f1f5f9;
+            --primary: #4f46e5; --primary-light: #818cf8;
+            --bg: #f8fafc; --card-bg: #ffffff;
+            --text: #1e293b; --text-muted: #64748b;
+            --border: #e2e8f0;
+            --bubble-user: #4f46e5; --bubble-ai: #f1f5f9;
             --radius: 12px; --shadow: 0 1px 3px rgba(0,0,0,0.06);
+            --body-bg: #f8fafc;
+            /* 模式切换过渡 */
+            transition: background 0.3s, color 0.3s;
         }
+        /* 暗色模式 */
+        [data-theme="dark"] {
+            --bg: #0f172a; --card-bg: #1e293b;
+            --text: #e2e8f0; --text-muted: #94a3b8;
+            --border: #334155;
+            --bubble-ai: #1e293b; --body-bg: #0f172a;
+            --shadow: 0 1px 3px rgba(0,0,0,0.3);
+            color-scheme: dark;
+        }
+        /* 跟随系统偏好 */
+        @media (prefers-color-scheme: dark) {
+            [data-theme="auto"] {
+                --bg: #0f172a; --card-bg: #1e293b;
+                --text: #e2e8f0; --text-muted: #94a3b8;
+                --border: #334155;
+                --bubble-ai: #1e293b; --body-bg: #0f172a;
+                --shadow: 0 1px 3px rgba(0,0,0,0.3);
+                color-scheme: dark;
+            }
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
-            background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
+            background: var(--body-bg); color: var(--text); height: 100vh; display: flex; flex-direction: column;
         }
+                /* 主布局：侧栏 + 内容 */
+        .app-layout { display: flex; flex: 1; overflow: hidden; }
+        .sidebar { width: 260px; min-width: 200px; background: var(--card-bg); border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: width 0.2s; }
+        .sidebar.collapsed { width: 0; min-width: 0; border-right: none; overflow: hidden; }
+        .sidebar-header { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+        .sidebar-header button { background: none; border: none; cursor: pointer; font-size: 16px; color: var(--text-muted); padding: 2px 6px; border-radius: 4px; }
+        .sidebar-header button:hover { background: var(--bg); }
+        .sidebar-list { flex: 1; overflow-y: auto; padding: 8px; }
+        .conv-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 4px; transition: background 0.15s; display: flex; align-items: center; justify-content: space-between; }
+        .conv-item:hover { background: var(--bg); }
+        .conv-item.active { background: #eef2ff; }
+        .conv-item .conv-info { flex: 1; overflow: hidden; }
+        .conv-item .conv-title { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .conv-item .conv-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .conv-item .conv-del { opacity: 0; font-size: 14px; color: #94a3b8; cursor: pointer; padding: 2px 4px; border-radius: 4px; transition: opacity 0.15s; }
+        .conv-item:hover .conv-del { opacity: 1; }
+        .conv-item .conv-del:hover { color: #dc2626; background: #fef2f2; }
+        .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .sidebar-toggle { display: none; }
+        @media (max-width: 768px) {
+            .sidebar { width: 0; min-width: 0; border-right: none; overflow: hidden; }
+            .sidebar.open { width: 260px; min-width: 200px; border-right: 1px solid var(--border); overflow: auto; }
+            .sidebar-toggle { display: inline; }
+        }
+
         .header {
             background: var(--card-bg); border-bottom: 1px solid var(--border);
             padding: 12px 24px; display: flex; align-items: center; gap: 12px; box-shadow: var(--shadow);
@@ -82,7 +133,22 @@
         .input-area button { background: var(--primary); color: #fff; border: none; border-radius: var(--radius); padding: 10px 20px; font-size: 15px; font-weight: 600; cursor: pointer; transition: background 0.2s; white-space: nowrap; }
         .input-area button:hover { background: var(--primary-light); }
         .input-area button:disabled { background: #cbd5e1; cursor: not-allowed; }
-        .input-area select { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: 14px; font-family: inherit; background: var(--card-bg); outline: none; cursor: pointer; min-width: 120px; }
+        .input-area select { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; font-size: 14px; font-family: inherit; background: var(--card-bg); outline: none; cursor: pointer; }
+        .input-area .collection-sel { min-width: 120px; }
+        .input-area .mode-sel { min-width: 80px; color: var(--primary); font-weight: 600; }
+
+        /* 试卷模式弹窗 */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.4); z-index: 100; justify-content: center; align-items: center; }
+        .modal-overlay.show { display: flex; }
+        .modal-box { background: var(--card-bg); border-radius: var(--radius); padding: 24px; width: 90%; max-width: 480px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); }
+        .modal-box h3 { margin-bottom: 16px; font-size: 18px; }
+        .modal-box label { display: block; font-size: 13px; color: var(--text-muted); margin: 8px 0 4px; }
+        .modal-box input, .modal-box select { width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-size: 14px; font-family: inherit; outline: none; margin-bottom: 8px; }
+        .modal-box input:focus { border-color: var(--primary-light); }
+        .modal-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+        .modal-actions button { padding: 8px 20px; border-radius: 8px; font-size: 14px; cursor: pointer; font-weight: 600; }
+        .modal-actions .btn-cancel { background: var(--bg); border: 1px solid var(--border); color: var(--text); }
+        .modal-actions .btn-confirm { background: var(--primary); border: none; color: #fff; }
 
         .panel { display: none; flex: 1; overflow-y: auto; padding: 24px; }
         .panel.active { display: flex; flex-direction: column; }
@@ -115,23 +181,50 @@
         <span class="subtitle">考研伴学 Agent</span>
         <span class="status" id="statusIndicator" title="点击检查">
             <span class="status-dot" id="statusDot"></span>
+            <span class="theme-toggle" onclick="cycleTheme()" title="切换主题" style="cursor:pointer;margin-right:8px;font-size:18px;" id="themeIcon">🌓</span>
             <span id="statusText">检测中...</span>
         </span>
         <button class="new-chat-btn" onclick="newConversation()" title="开始新对话">+ 新对话</button>
     </div>
 
-    <div class="tab-bar">
-        <button class="tab-btn active" onclick="switchTab('chat')">  对话</button>
-        <button class="tab-btn" onclick="switchTab('manage')">  知识库管理</button>
-    </div>
+        <div class="app-layout">
+        <!-- 侧栏 -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <span>💬 对话记录</span>
+                <button onclick="toggleSidebar()" title="收起">◀</button>
+            </div>
+            <div class="sidebar-list" id="convList">
+                <span style="font-size:12px;color:var(--text-muted);">加载中...</span>
+            </div>
+        </div>
 
-    <div class="chat-container" id="chatContainer">
-        <div class="empty-state" id="emptyState">
-            <div class="icon">  </div>
-            <h2>你好！我是研途助手</h2>
-            <p>我可以帮你解答考研知识点、出练习题、制定复习计划。<br>试试问我"什么是拉格朗日中值定理？"</p>
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <div class="tab-bar">
+                <button class="sidebar-toggle tab-btn" onclick="toggleSidebar()">☰</button>
+                <button class="tab-btn active" onclick="switchTab('chat')">💬 对话</button>
+                <button class="tab-btn" onclick="switchTab('manage')">📚 知识库管理</button>
+            </div>
+
+            <div class="chat-container" id="chatContainer">
+                <div class="empty-state" id="emptyState">
+                    <div class="icon">📚</div>
+                    <h2>你好！我是研途助手</h2>
+                    <p>我可以帮你解答考研知识点、出练习题、制定复习计划。<br>试试问我"什么是拉格朗日中值定理？"</p>
+                </div>
+            </div>
+
+            <div class="panel" id="managePanel">
+                <!-- 管理面板内容保持不变 -->
+            </div>
+
+            <div class="input-area" id="inputArea">
+                <!-- 输入栏内容保持不变 -->
+            </div>
         </div>
     </div>
+
 
     <div class="panel" id="managePanel">
         <div class="manage-section">
@@ -158,11 +251,38 @@
     </div>
 
     <div class="input-area" id="inputArea">
-        <select id="collectionSelect" title="选择知识库">
+        <select id="collectionSelect" class="collection-sel" title="选择知识库">
             <option value="default">默认知识库</option>
         </select>
+        <select id="modeSelect" class="mode-sel" title="模式切换" onchange="onModeChange()">
+            <option value="auto">🤖 自动</option>
+            <option value="qa">💬 问答</option>
+            <option value="quiz">📝 出题</option>
+            <option value="exam">📋 出卷</option>
+        </select>
         <textarea id="messageInput" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行..."></textarea>
-        <button id="sendBtn" onclick="sendMessage()">发送</button>
+        <button id="sendBtn" onclick="sendOrExam()">发送</button>
+    </div>
+
+    <!-- 试卷模式弹窗 -->
+    <div class="modal-overlay" id="examModal">
+        <div class="modal-box">
+            <h3>📋 生成试卷</h3>
+            <label>试卷要求</label>
+            <input id="examMessage" placeholder="如：出一套高数期中模拟卷，难度中等" />
+            <label>教材 Collection</label>
+            <select id="examTextbooks" multiple style="height:100px;">
+                <option value="default">默认知识库</option>
+            </select>
+            <span style="font-size:11px;color:var(--text-muted);">按住 Ctrl 多选</span>
+            <label>试卷 Collection <span style="font-size:11px;color:var(--text-muted);">（留空则自动从绑定查找）</span></label>
+            <select id="examPapers" multiple style="height:80px;"></select>
+            <span style="font-size:11px;color:var(--text-muted);">按住 Ctrl 多选，留空自动匹配</span>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeExamModal()">取消</button>
+                <button class="btn-confirm" onclick="generateExam()">生成试卷</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -191,6 +311,74 @@
         chatContainer.appendChild(emptyState);
         emptyState.style.display = '';
         saveChatHistory();
+        loadConvList();
+    // ============================================
+    // 侧栏对话列表
+    // ============================================
+    async function loadConvList() {
+        try {
+            const res = await fetch('/api/conversations');
+            const data = await res.json();
+            const list = data.conversations || [];
+            const container = document.getElementById('convList');
+            if (!list.length) {
+                container.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">暂无对话记录</span>';
+                return;
+            }
+            container.innerHTML = list.map(c => {
+                const active = c.conversation_id === currentConversationId ? ' active' : '';
+                const date = c.updated_at ? new Date(c.updated_at).toLocaleDateString('zh-CN') : '';
+                return `<div class="conv-item${active}" onclick="switchConv('${c.conversation_id}')" title="${c.title}">
+                    <div class="conv-info">
+                        <div class="conv-title">${escapeHtml(c.title || '新对话')}</div>
+                        <div class="conv-meta">${c.message_count || 0} 条 · ${date}</div>
+                    </div>
+                    <span class="conv-del" onclick="event.stopPropagation();deleteConv('${c.conversation_id}')">✕</span>
+                </div>`;
+            }).join('');
+        } catch(e) { console.warn('加载对话列表失败', e); }
+    }
+
+    async function switchConv(id) {
+        if (id === currentConversationId) return;
+        currentConversationId = id;
+        chatContainer.innerHTML = '';
+        try {
+            const res = await fetch('/api/conversations/' + id);
+            const data = await res.json();
+            if (data.messages && data.messages.length > 0) {
+                if (emptyState) emptyState.style.display = 'none';
+                data.messages.forEach(m => {
+                    const bubble = appendMessage(m.role, m.content);
+                    if (bubble) {
+                        if (m.role === 'assistant' && m.content) {
+                            bubble.innerHTML = renderContent(m.content);
+                        }
+                    }
+                });
+            } else {
+                if (emptyState) emptyState.style.display = '';
+            }
+        } catch(e) {
+            chatContainer.innerHTML = '<div class="empty-state"><p>⚠️ 加载失败</p></div>';
+        }
+        loadConvList();
+        saveChatHistory();
+    }
+
+    async function deleteConv(id) {
+        if (!confirm('确定删除此对话？')) return;
+        try {
+            await fetch('/api/conversations/' + id, {method: 'DELETE'});
+            if (id === currentConversationId) newConversation();
+            loadConvList();
+        } catch(e) { alert('删除失败: ' + e.message); }
+    }
+
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('open');
+    }
+
     }
 
     // ============================================
@@ -272,17 +460,105 @@
     }
     loadCollections();
     restoreChatHistory();
+    loadConvList();
 
     // ============================================
     // 键盘事件
     // ============================================
     messageInput.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+        if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendOrExam(); }
     });
     messageInput.addEventListener("input", () => {
         messageInput.style.height = "auto";
         messageInput.style.height = Math.min(messageInput.scrollHeight, 150) + "px";
     });
+
+    // ============================================
+    // 模式切换 + 试卷弹窗
+    // ============================================
+    function onModeChange() {
+        const mode = document.getElementById('modeSelect').value;
+        const input = document.getElementById('messageInput');
+        switch (mode) {
+            case 'qa':    input.placeholder = '输入知识点问题...'; break;
+            case 'quiz':  input.placeholder = '如：出5道极限计算题，选择题，强化难度'; break;
+            case 'exam':  input.placeholder = '点击发送配置试卷参数...'; break;
+            default:      input.placeholder = '输入问题，Enter 发送，Shift+Enter 换行...';
+        }
+    }
+    function sendOrExam() {
+        const mode = document.getElementById('modeSelect').value;
+        if (mode === 'exam') {
+            openExamModal();
+        } else {
+            sendMessage();
+        }
+    }
+    async function openExamModal() {
+        // 加载教材和试卷 Collection 到弹窗下拉框
+        try {
+            const res = await fetch('/api/documents');
+            const data = await res.json();
+            const cols = data.collections || [];
+            const bookSel = document.getElementById('examTextbooks');
+            const paperSel = document.getElementById('examPapers');
+            bookSel.innerHTML = cols.map(n => `<option value="${n}">${n}</option>`).join('');
+            paperSel.innerHTML = cols.map(n => `<option value="${n}">${n}</option>`).join('');
+        } catch(e) {}
+        document.getElementById('examModal').classList.add('show');
+    }
+    function closeExamModal() {
+        document.getElementById('examModal').classList.remove('show');
+    }
+    async function generateExam() {
+        closeExamModal();
+        const message = document.getElementById('examMessage').value.trim() || '生成一套试卷';
+        const textbookSel = document.getElementById('examTextbooks');
+        const paperSel = document.getElementById('examPapers');
+        const textbooks = [...textbookSel.selectedOptions].map(o => o.value);
+        const exams = [...paperSel.selectedOptions].map(o => o.value);
+
+        if (emptyState) emptyState.style.display = "none";
+        appendMessage("user", "[生成试卷] " + message);
+
+        const aiBubble = appendMessage("ai", "", true);
+        let streamEnded = false;
+        isStreaming = true; sendBtn.disabled = true; messageInput.disabled = true;
+
+        try {
+            const res = await fetch('/api/quiz/exam', {
+                method: 'POST', headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    message, textbook_collections: textbooks.length ? textbooks : ['default'],
+                    exam_collections: exams.length ? exams : null,
+                }),
+            });
+            if (!res.ok) throw new Error((await res.json().catch(()=>({detail:'服务器错误'}))).detail);
+            const reader = res.body.getReader(); const decoder = new TextDecoder();
+            let buffer = '', rawTokens = [];
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split('\n\n'); buffer = lines.pop() || '';
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const p = line.slice(6);
+                    if (p === '[DONE]') { streamEnded = true; break; }
+                    rawTokens.push(p); aiBubble.textContent += p;
+                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                }
+            }
+            aiBubble.classList.remove('streaming');
+            if (rawTokens.length > 0) aiBubble.innerHTML = renderContent(rawTokens.join(''));
+            saveChatHistory();
+        } catch(e) {
+            aiBubble.classList.remove('streaming'); aiBubble.classList.add('error');
+            aiBubble.innerHTML = '❌ ' + escapeHtml(e.message || '请求失败');
+        } finally {
+            isStreaming = false; sendBtn.disabled = false; messageInput.disabled = false;
+        }
+    }
 
     // ============================================
     // 核心：发送消息并处理 SSE 流式响应
@@ -374,6 +650,7 @@
             sendBtn.disabled = false;
             messageInput.disabled = false;
             messageInput.focus();
+            loadConvList();
         }
     }
 
@@ -479,6 +756,26 @@
         chatContainer.scrollTop = chatContainer.scrollHeight;
         return bubble;
     }
+
+    // ============================================
+    // 暗色模式切换
+    // ============================================
+    function getTheme() {
+        return localStorage.getItem('theme') || 'auto';
+    }
+    function applyTheme(theme) {
+        document.documentElement.setAttribute('data-theme', theme);
+        const icon = document.getElementById('themeIcon');
+        if (icon) icon.textContent = theme === 'dark' ? '🌙' : theme === 'light' ? '☀️' : '🌓';
+    }
+    function cycleTheme() {
+        const current = getTheme();
+        const next = current === 'auto' ? 'dark' : current === 'dark' ? 'light' : 'auto';
+        localStorage.setItem('theme', next);
+        applyTheme(next);
+    }
+    applyTheme(getTheme());
+
 
     // ============================================
     // Tab 切换

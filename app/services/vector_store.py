@@ -267,7 +267,9 @@ def hybrid_search(
     k: Optional[int] = None,
     vector_weight: float = 0.6,
     metadata_filter: Optional[dict] = None,
+    use_rerank: bool = True,
 ) -> List[Document]:
+
     """
     混合检索：稠密向量 + BM25 关键词，加权融合排序。
 
@@ -308,7 +310,7 @@ def hybrid_search(
     # ---- 步骤2: BM25 关键词检索 ----
     bm25 = BM25Okapi(tokenized_corpus)
     bm25_scores = bm25.get_scores(tokenized_query)
-    bm25_max = max(bm25_scores) if bm25_scores else 1
+    bm25_max = float(max(bm25_scores)) if len(bm25_scores) > 0 else 1.0
     bm25_normalized = [s / bm25_max if bm25_max else 0 for s in bm25_scores]
 
     # ---- 步骤3: 向量检索 ----
@@ -350,10 +352,24 @@ def hybrid_search(
         if settings.RETRIEVAL_THRESHOLD <= 0.0 or score >= (1 - settings.RETRIEVAL_THRESHOLD / 2.0):
             doc.metadata["relevance_score"] = round(score, 4)
             deduped.append(doc)
-            if len(deduped) >= k:
+            # 粗筛时取 k*5 个候选供 Rerank 精排（如 k=4 则取 20 个）
+            fetch_count = k * 5 if use_rerank else k
+            if len(deduped) >= fetch_count:
                 break
 
+
+        # ---- Rerank 精排 ----
+    if use_rerank and len(deduped) > k:
+        from app.services.reranker import rerank
+        deduped = rerank(
+            query=query,
+            docs=deduped,
+            top_k=k,
+            min_score=0.0,  # [后续可调] 设 0.3 可过滤低分噪音
+        )
+
     return deduped
+
 
 
 

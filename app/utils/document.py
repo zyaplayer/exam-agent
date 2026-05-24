@@ -23,6 +23,38 @@ from app.core.config import settings
 
 
 # ============================================
+# 第〇部分：前置内容过滤
+# ============================================
+
+# 前置内容关键词（页面前几段如果匹配这些词，整页丢弃）
+FRONT_MATTER_PATTERNS = [
+    "前言", "序言", "致读者", "出版说明", "编者的话",
+    "使用说明", "导读", "写在前面", "作者简介",
+    "内容提要", "图书在版编目", "CIP数据", "版权信息",
+]
+
+
+def _looks_like_front_matter(text: str) -> bool:
+    """
+    判断文本是否像前置内容（扉页/前言/版权页等）。
+
+    启发式规则:
+      1. 文本开头 200 字符内匹配 FRONT_MATTER_PATTERNS 关键词
+      2. 文本极短（< 30 字符），通常为章节标题页
+    """
+    if not text or not text.strip():
+        return True
+    if len(text.strip()) < 30:
+        return True
+    head = text[:200]
+    return any(p in head for p in FRONT_MATTER_PATTERNS)
+
+
+
+
+
+
+# ============================================
 # 第一部分：文档加载
 # ============================================
 
@@ -235,7 +267,7 @@ def split_by_markdown_headers(docs: List[Document]) -> List[Document]:
 
 def process_document(file_path: str) -> List[Document]:
     """
-    一键流程: 加载 → 切分。
+    一键流程: 加载 → 过滤前置内容 → 切分。
     这是文档处理的主要入口，外部只需调用此函数。
 
     参数:
@@ -256,7 +288,16 @@ def process_document(file_path: str) -> List[Document]:
     if all_empty:
         raise RuntimeError(f"文档 '{Path(file_path).name}' 未提取到有效文本内容，可能为扫描版PDF或空文件")
 
+    # 过滤前置内容（扉页/前言/目录页）
+    filtered_docs = [d for d in docs if not _looks_like_front_matter(d.page_content)]
+    if filtered_docs:
+        skipped = len(docs) - len(filtered_docs)
+        if skipped > 0:
+            print(f"  [过滤] 已跳过 {skipped} 页前置内容（前言/扉页等）")
+        docs = filtered_docs
+
     return split_by_markdown_headers(docs)
+
 
 
 # ============================================

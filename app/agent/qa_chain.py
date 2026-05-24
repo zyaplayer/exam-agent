@@ -57,7 +57,11 @@ def _format_retrieved_context(docs: List[Document]) -> str:
         if hierarchy:
             location += f", 章节: {hierarchy}"
 
-            parts.append(f"【片段 [编号{i}]】（{location}）\n{doc.page_content}")
+            content = doc.page_content
+            if len(content) > 400:
+                content = content[:300] + "\n...(已截断)...\n" + content[-100:]
+            parts.append(f"【片段 [编号{i}]】（{location}）\n{content}")
+
 
 
 
@@ -119,7 +123,9 @@ def ask_question(
     user_prompt = QA_USER_PROMPT_TEMPLATE.format(
         question=question,
         context=context,
+        conversation_history="",
     )
+
 
     # 步骤5: 调用 LLM
     try:
@@ -206,7 +212,8 @@ async def ask_question_stream(
         # 步骤4: 组装 Prompt（注入对话历史 + Token 截断保护）
     from app.services.conversation_service import format_history_for_prompt
     from app.utils.token_counter import check_and_truncate
-    conversation_history = format_history_for_prompt(conversation_id) if conversation_id else ""
+    conversation_history = format_history_for_prompt(conversation_id, max_turns=5) if conversation_id else ""
+
 
     user_prompt = check_and_truncate(
         system_prompt=QA_SYSTEM_PROMPT,

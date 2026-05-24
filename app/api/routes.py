@@ -33,6 +33,11 @@ from app.services.conversation_service import (
     get_history,
 )
 
+from app.agent.prompts import QA_SYSTEM_PROMPT
+from app.services.conversation_service import format_history_for_prompt
+from app.utils.token_counter import estimate_tokens
+
+
 
 # ============================================
 # 路由实例
@@ -74,7 +79,7 @@ class IngestResponse(BaseModel):
     filename: str
     collection_name: str
     chunk_count: int
-    message: str = "文档入库成功"
+    message: str = ""
 
 
 class CollectionListResponse(BaseModel):
@@ -178,8 +183,19 @@ async def chat(req: ChatRequest):
         async for token in token_generator:
             full_answer.append(token)
             yield token
+        full_text = "".join(full_answer)
         append_message(conv_id, "user", req.message)
-        append_message(conv_id, "assistant", "".join(full_answer))
+        append_message(conv_id, "assistant", full_text)
+        # Token 消耗日志
+        input_est = estimate_tokens(
+            QA_SYSTEM_PROMPT + 
+            format_history_for_prompt(conv_id, max_turns=5) +
+            req.message
+        )
+        output_est = estimate_tokens(full_text)
+        est_cost = (input_est / 1e6 * 12) + (output_est / 1e6 * 24)
+        print(f"[Token] 本轮估算: 输入~{input_est}t, 输出~{output_est}t, 费用~¥{est_cost:.4f}")
+
 
     return StreamingResponse(
         _sse_wrapper(history_wrapper()),
@@ -283,11 +299,22 @@ async def upload_document(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件保存失败: {str(e)}")
 
+    outline_msg = ""
     try:
         chunk_count = ingest_document(
             file_path=str(save_path),
             collection_name=collection_name,
         )
+        # 自动提取教材大纲（上传成功后尝试识别目录）
+        try:
+            from app.utils.document import load_document
+            from app.utils.outline_extractor import process_and_save_outline
+            raw_docs = load_document(str(save_path))
+            _, saved_path = process_and_save_outline(raw_docs, collection_name)
+            if saved_path:
+                outline_msg = "，已自动提取章节目录大纲"
+        except Exception:
+            pass
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文档入库失败: {str(e)}")
 
@@ -295,7 +322,10 @@ async def upload_document(
         filename=filename,
         collection_name=collection_name,
         chunk_count=chunk_count,
+        message=f"文档入库成功{outline_msg}",
     )
+
+
 
 
 # ============================================

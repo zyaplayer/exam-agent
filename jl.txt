@@ -1,0 +1,176 @@
+================================================================================
+  考研伴学 Agent (Exam Companion Agent) — 项目概述
+================================================================================
+
+一、项目名称
+--------------------------------------------------------------------------------
+  考研伴学 Agent (Exam Companion Agent)
+  —— 以考研为导向的智能体后端，支持 RAG 知识问答、做题练习与学习规划。
+
+
+二、项目功能
+--------------------------------------------------------------------------------
+  1. 文档智能处理
+     - 支持 PDF / Markdown / TXT / DOCX 格式上传
+     - 三级智能切分：标题切分(H1→H2→H3) → 段落切分 → 递归字符切分
+     - SHA256 哈希去重，避免重复入库
+     - 中文 Collection 名称自动转码
+
+  2. RAG 知识问答
+     - 混合检索：BM25 关键词 + ChromaDB 稠密向量加权融合
+     - 相似度分数过滤、层级元数据注入(章→节→小节)
+     - 空知识库直接拒绝回答 + 引用标注(强制标注来源[1][2])
+     - 流式 SSE 返回 + Token 计数截断保护
+     - LaTeX 公式 + Markdown 渲染
+
+  3. 做题练习
+     - 简单出题模式：数量/方向/题型/难度可配置，附带标准答案+解析
+     - 试卷模式：以参考真题卷为模板，从教材知识点仿写完整试卷
+     - 教材-试卷 Collection 绑定管理(前端可视化)
+
+  4. 学习规划
+     - 时间线模式：考试日期→剩余天数→三阶段倒排(基础/强化/冲刺)
+     - 灵活模式：无考试日期时按章节内容量编排路线
+     - 学习卡片生成 + 快速咨询(不强制RAG)
+
+  5. 多轮对话
+     - 对话历史自动保存(JSON持久化)
+     - 历史注入Prompt(最多10轮)
+     - 对话列表管理(API+前端)
+
+  6. 前端测试页
+     - 聊天面板 + 知识库管理面板(Tab切换)
+     - LaTeX/Markdown渲染 + 流式打字效果
+     - 状态持久化(localStorage) + 健康状态灯 + 重试按钮
+
+  7. 运维
+     - 健康检查(浅度/深度)
+     - Docker 一键部署
+     - Swagger API 文档
+
+
+三、实现方案
+--------------------------------------------------------------------------------
+  1. 整体架构
+     Browser(SSE) → FastAPI routes → Router(混合意图) → Agent链路 → LLM/ChromaDB
+
+  2. 意图路由(混合方案)
+     第1层: 规则引擎(关键词匹配, 0 API调用)
+     第2层: LLM语义分类(低置信度/平局时自动升级)
+
+  3. 三条 Agent 链路
+     QA:      混合检索 → 过滤 → 历史注入 → Token截断 → LLM流式生成
+     Quiz:    参数解析 → 知识点检索 → LLM出题(答案+解析) → 流式返回
+     Planner: LLM提取信息 → 时间计算 → 大纲加载 → LLM生成计划 → 流式
+
+  4. 文档处理管道
+     上传 → 加载器分配 → 三级切分 → SHA256去重 → BGE向量化 → ChromaDB
+
+  5. 模型管理(工厂模式)
+     对话: DeepSeek V4 Flash(默认) / Qwen Plus(备用)
+     嵌入: BAAI/bge-small-zh-v1.5(本地CPU, 免费离线)
+     HF镜像: hf-mirror.com
+
+  6. 数据持久化
+     - ChromaDB: 向量库(data/chroma_db/)
+     - JSON文件: 对话历史/Collection绑定/中文名称映射
+     - 环境变量: .env(不入Git)
+
+
+四、技术栈
+--------------------------------------------------------------------------------
+  层级        | 技术
+  ────────────┼─────────────────────────────────
+  语言        | Python 3.12
+  框架        | FastAPI + Uvicorn
+  AI框架      | LangChain (core/openai/chroma/huggingface/text-splitters)
+  LLM         | DeepSeek V4 Flash (API, OpenAI兼容)
+  嵌入模型    | BAAI/bge-small-zh-v1.5 (HuggingFace, 本地CPU)
+  向量数据库  | ChromaDB 1.5+ (持久化)
+  检索引擎    | BM25 (rank-bm25) + 稠密向量加权融合
+  中文分词    | jieba
+  文档解析    | PyPDF4 / python-docx / TextLoader
+  前端        | HTML5 + CSS3 + JavaScript
+  公式渲染    | KaTeX CDN
+  Markdown    | marked.js CDN
+  配置管理    | pydantic-settings
+  容器化      | Docker + Docker Compose
+  运行环境    | Conda (exam_agent) / Docker
+
+
+五、项目规模
+--------------------------------------------------------------------------------
+  Python 源文件:  17 个
+  HTML 前端:      1 个
+  总代码量:       ~3500 行
+  API 接口:       12 个
+  Prompt 模板:    12 组
+  外部依赖:       18 个 Python 包
+  已知缺陷:       54 条 → 已修复 28 条 → 剩余 26 条
+  Git 提交:       8 次
+
+
+六、API 接口清单
+--------------------------------------------------------------------------------
+  POST   /api/chat                    核心对话(QA/Quiz/Planner SSE流式)
+  POST   /api/quiz/exam               试卷模式出题
+  POST   /api/documents/upload         上传文档入库
+  GET    /api/documents               Collection列表
+  POST   /api/collections/bind         创建教材-试卷绑定
+  GET    /api/collections/bindings     查询所有绑定
+  DELETE /api/collections/bindings/{id} 删除绑定
+  GET    /api/collections/aliases      名称映射查询
+  GET    /api/conversations            对话列表
+  GET    /api/conversations/{id}       对话历史
+  DELETE /api/conversations/{id}       删除对话
+  GET    /api/health                  健康检查(?deep=true)
+
+
+七、部署方式
+--------------------------------------------------------------------------------
+  开发:  conda activate exam_agent → python main.py → http://localhost:8000
+  Docker: docker compose up -d
+  生产:  Docker镜像 → 云容器服务 → Nginx反代 + HTTPS + 鉴权
+
+
+八、文件结构
+--------------------------------------------------------------------------------
+  exam_agent_project/
+  ├── main.py                      启动入口(lifespan模式)
+  ├── requirements.txt              18个依赖
+  ├── Dockerfile / docker-compose.yml
+  ├── .env / .env.example
+  │
+  ├── app/
+  │   ├── core/
+  │   │   ├── config.py             全局配置(pydantic-settings)
+  │   │   └── llm_manager.py        LLM工厂(provider注册表)
+  │   ├── agent/
+  │   │   ├── prompts.py            12组Prompt模板
+  │   │   ├── router.py             混合意图路由
+  │   │   ├── qa_chain.py           RAG问答链路
+  │   │   ├── planner_chain.py      学习规划链路
+  │   │   └── quiz_generator.py     做题练习链路
+  │   ├── services/
+  │   │   ├── vector_store.py       ChromaDB管理(混合检索+去重+转码)
+  │   │   └── conversation_service.py 对话历史管理
+  │   ├── utils/
+  │   │   ├── document.py           文档解析+三级切分
+  │   │   └── token_counter.py      Token计数与截断
+  │   └── api/
+  │       └── routes.py             12个API接口
+  │
+  ├── data/
+  │   ├── chroma_db/                向量库持久化
+  │   ├── raw_docs/                 原始文档
+  │   ├── summary_db/               教材目录大纲
+  │   ├── conversations/            对话历史JSON
+  │   ├── bindings.json             Collection绑定
+  │   └── collection_aliases.json   中文名称映射
+  │
+  └── static/
+      └── index.html                前端(双面板+LaTeX/MD渲染+持久化)
+
+================================================================================
+  版本: 0.1.0  |  更新日期: 2026-05-15
+================================================================================

@@ -38,6 +38,15 @@ async def lifespan(app: FastAPI):
     for d in dirs_to_create:
         d.mkdir(parents=True, exist_ok=True)
 
+    # 预载嵌入模型（避免首次请求时等待下载/加载）
+    try:
+        from app.core.llm_manager import get_embeddings
+        print("[启动] 正在预载嵌入模型...")
+        get_embeddings()
+        print("[启动] 嵌入模型已就绪")
+    except Exception as e:
+        print(f"[警告] 嵌入模型预载失败: {e}")
+
     # 启动预检：API Key 是否已配置
     if not settings.DEEPSEEK_API_KEY or settings.DEEPSEEK_API_KEY.startswith("sk-your-"):
         print("[警告] DEEPSEEK_API_KEY 未配置或仍为占位值，LLM 调用将失败")
@@ -45,6 +54,7 @@ async def lifespan(app: FastAPI):
         print(f"[启动] DeepSeek API Key 已配置 ({settings.DEEPSEEK_API_KEY[:8]}...)")
 
     print(f"[启动] {settings.PROJECT_NAME} v{settings.PROJECT_VERSION}")
+
     print(f"[启动] 文档上传目录: {settings.RAW_DOCS_DIR}")
     print(f"[启动] 向量库目录:   {settings.CHROMA_PERSIST_DIR}")
 
