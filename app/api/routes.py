@@ -278,13 +278,18 @@ async def upload_document(
     raw_docs_dir = settings.BASE_DIR / settings.RAW_DOCS_DIR.lstrip("./")
     raw_docs_dir.mkdir(parents=True, exist_ok=True)
 
-    # 同名文件加时间戳防覆盖
+    # 保存到临时路径，计算文件SHA256去重
+    import hashlib
     stem = Path(filename).stem
-    save_path = raw_docs_dir / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+    save_path = raw_docs_dir / filename
+    # 如果同名文件已存在，跳过保存（仍会入库，因为入库有SHA256块级去重）
+    if save_path.exists():
+        save_path = raw_docs_dir / f"{stem}_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
 
     # 文件大小限制: 100MB
     max_size = 100 * 1024 * 1024
     total_size = 0
+
     try:
         with open(save_path, "wb") as f:
             while chunk := await file.read(1024 * 1024):
@@ -305,6 +310,16 @@ async def upload_document(
             file_path=str(save_path),
             collection_name=collection_name,
         )
+        if chunk_count == 0:
+            # 全部重复 → 删除刚保存的文件（节约磁盘）
+            save_path.unlink(missing_ok=True)
+            return IngestResponse(
+                filename=filename,
+                collection_name=collection_name,
+                chunk_count=0,
+                message="文档已存在，所有内容均已入库，无需重复上传",
+            )
+
         # 自动提取教材大纲（上传成功后尝试识别目录）
         try:
             from app.utils.document import load_document
@@ -313,6 +328,16 @@ async def upload_document(
             _, saved_path = process_and_save_outline(raw_docs, collection_name)
             if saved_path:
                 outline_msg = "，已自动提取章节目录大纲"
+                # 自动将大纲入库（用于两阶段检索的阶段1）
+                try:
+                    ingest_document(
+                        file_path=saved_path,
+                        collection_name=f"{collection_name}_outline",
+                    )
+                    outline_msg += "，已构建大纲索引"
+                except Exception:
+                    pass
+
         except Exception:
             pass
     except Exception as e:

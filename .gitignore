@@ -23,9 +23,33 @@ env/
 # 向量数据库持久化数据
 data/chroma_db/
 
+# BM25 预建索引缓存
+data/.bm25_index/
+
+# ChromaDB 运行时文件
+data/collection_aliases.json
+
+# 对话历史
+data/conversations/
+
+# 原始上传文档（体量大，协作者自行准备）
+data/raw_docs/
+
+# 绑定关系（运行时数据）
+data/bindings.json
+
 # Docker
 .docker/
 
 # 操作系统
 .DS_Store
 Thumbs.db
+
+# 临时调试/文档文件
+jl.txt
+test.py
+*.log
+*.tmp
+
+# Word 临时文件
+~$*.docx

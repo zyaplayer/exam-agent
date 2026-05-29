@@ -13,6 +13,7 @@ from app.core.config import settings
 from app.core.llm_manager import get_llm
 from app.services.vector_store import hybrid_search as search_documents
 from app.agent.prompts import QA_SYSTEM_PROMPT, QA_USER_PROMPT_TEMPLATE
+from app.agent.query_rewriter import rewrite_query
 
 
 # ============================================
@@ -57,10 +58,10 @@ def _format_retrieved_context(docs: List[Document]) -> str:
         if hierarchy:
             location += f", 章节: {hierarchy}"
 
-            content = doc.page_content
-            if len(content) > 400:
-                content = content[:300] + "\n...(已截断)...\n" + content[-100:]
-            parts.append(f"【片段 [编号{i}]】（{location}）\n{content}")
+        content = doc.page_content
+        if len(content) > 400:
+            content = content[:300] + "\n...(已截断)...\n" + content[-100:]
+        parts.append(f"【片段 [编号{i}]】（{location}）\n{content}")
 
 
 
@@ -100,7 +101,8 @@ def ask_question(
         k = settings.RETRIEVAL_K
 
         # 步骤1: 向量检索
-    retrieved_docs = search_documents(
+    from app.services.vector_store import hierarchical_search
+    retrieved_docs = hierarchical_search(
         query=question,
         collection_name=collection_name,
         k=k,
@@ -114,6 +116,23 @@ def ask_question(
             "1. 先上传相关教材或笔记到知识库\n"
             "2. 或者换一个知识库中已有资料的问题试试"
         )
+    
+    # 步骤2.5: 最低相关性门槛（最高分片段不够相关 → 拒绝回答）
+    
+    if retrieved_docs:
+        top_score = max(
+            doc.metadata.get("rerank_score", doc.metadata.get("combined_score", 0))
+            for doc in retrieved_docs
+        )
+        if top_score < 0.3:
+            return (
+                "抱歉，我在教材中没有找到与你的问题高度相关的内容。\n\n"
+                "建议：\n"
+                "1. 尝试换一种表述方式提问\n"
+                "2. 检查是否已上传了相关科目的教材\n"
+                "3. 直接查阅教材中对应的章节"
+            )
+
 
     # 步骤3: 构建上下文
     context = _format_retrieved_context(retrieved_docs)
@@ -186,12 +205,20 @@ async def ask_question_stream(
     if k is None:
         k = settings.RETRIEVAL_K
 
-        # 步骤1: 向量检索
-    retrieved_docs = search_documents(
-        query=question,
+    # 步骤1: 查询重写（指代消解）
+    rewritten_question = question
+    if conversation_id:
+        import asyncio
+        rewritten_question = await rewrite_query(question, conversation_id)
+
+    # 步骤1.5: 检索（使用改写后的问题）
+    from app.services.vector_store import hierarchical_search
+    retrieved_docs = hierarchical_search(
+        query=rewritten_question,   # ← 改这里
         collection_name=collection_name,
         k=k,
     )
+
 
     # 步骤2: 知识库为空时直接拒绝回答，不调用 LLM
     if not retrieved_docs:
@@ -204,6 +231,8 @@ async def ask_question_stream(
         for char in message:
             yield char
         return
+    
+
 
     # 步骤3: 构建上下文
     context = _format_retrieved_context(retrieved_docs)

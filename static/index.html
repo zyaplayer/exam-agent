@@ -216,52 +216,43 @@
             </div>
 
             <div class="panel" id="managePanel">
-                <!-- 管理面板内容保持不变 -->
+                <div class="manage-section">
+                    <h3>📎 创建教材-试卷绑定</h3>
+                    <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">教材 Collection：</p>
+                    <div class="col-grid" id="textbookTags"></div>
+                    <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">试卷 Collection：</p>
+                    <div class="col-grid" id="examTags"></div>
+                    <input id="bindingLabel" placeholder="绑定标签（如：数学科目全套）" />
+                    <button onclick="createBinding()">创建绑定</button>
+                    <span id="bindMsg" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
+                </div>
+                <div class="manage-section">
+                    <h3>📋 已有绑定关系</h3>
+                    <div id="bindingList" style="font-size:13px;color:var(--text-muted);">加载中...</div>
+                </div>
+                <div class="manage-section">
+                    <h3>📤 上传文档</h3>
+                    <input type="file" id="uploadFile" accept=".pdf,.markdown,.txt,.docx" />
+                    <select id="uploadCollection" style="margin-left:8px;"></select>
+                    <button onclick="uploadDocument()" style="margin-left:8px;">上传入库</button>
+                    <span id="uploadMsg" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
+                </div>
             </div>
 
             <div class="input-area" id="inputArea">
-                <!-- 输入栏内容保持不变 -->
+                <select id="collectionSelect" class="collection-sel" title="选择知识库">
+                    <option value="default">默认知识库</option>
+                </select>
+                <select id="modeSelect" class="mode-sel" title="模式切换" onchange="onModeChange()">
+                    <option value="auto">🤖 自动</option>
+                    <option value="qa">💬 问答</option>
+                    <option value="quiz">📝 出题</option>
+                    <option value="exam">📋 出卷</option>
+                </select>
+                <textarea id="messageInput" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行..."></textarea>
+                <button id="sendBtn" onclick="sendOrExam()">发送</button>
             </div>
         </div>
-    </div>
-
-
-    <div class="panel" id="managePanel">
-        <div class="manage-section">
-            <h3>  创建教材-试卷绑定</h3>
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">教材 Collection：</p>
-            <div class="col-grid" id="textbookTags"></div>
-            <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">试卷 Collection：</p>
-            <div class="col-grid" id="examTags"></div>
-            <input id="bindingLabel" placeholder="绑定标签（如：数学科目全套）" />
-            <button onclick="createBinding()">创建绑定</button>
-            <span id="bindMsg" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
-        </div>
-        <div class="manage-section">
-            <h3>  已有绑定关系</h3>
-            <div id="bindingList" style="font-size:13px;color:var(--text-muted);">加载中...</div>
-        </div>
-        <div class="manage-section">
-            <h3>  上传文档</h3>
-            <input type="file" id="uploadFile" accept=".pdf,.markdown,.txt" />
-            <select id="uploadCollection" style="margin-left:8px;"></select>
-            <button onclick="uploadDocument()" style="margin-left:8px;">上传入库</button>
-            <span id="uploadMsg" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
-        </div>
-    </div>
-
-    <div class="input-area" id="inputArea">
-        <select id="collectionSelect" class="collection-sel" title="选择知识库">
-            <option value="default">默认知识库</option>
-        </select>
-        <select id="modeSelect" class="mode-sel" title="模式切换" onchange="onModeChange()">
-            <option value="auto">🤖 自动</option>
-            <option value="qa">💬 问答</option>
-            <option value="quiz">📝 出题</option>
-            <option value="exam">📋 出卷</option>
-        </select>
-        <textarea id="messageInput" rows="1" placeholder="输入问题，Enter 发送，Shift+Enter 换行..."></textarea>
-        <button id="sendBtn" onclick="sendOrExam()">发送</button>
     </div>
 
     <!-- 试卷模式弹窗 -->
@@ -312,6 +303,8 @@
         emptyState.style.display = '';
         saveChatHistory();
         loadConvList();
+    }
+
     // ============================================
     // 侧栏对话列表
     // ============================================
@@ -350,10 +343,8 @@
                 if (emptyState) emptyState.style.display = 'none';
                 data.messages.forEach(m => {
                     const bubble = appendMessage(m.role, m.content);
-                    if (bubble) {
-                        if (m.role === 'assistant' && m.content) {
-                            bubble.innerHTML = renderContent(m.content);
-                        }
+                    if (bubble && m.role === 'assistant' && m.content) {
+                        bubble.innerHTML = renderContent(m.content);
                     }
                 });
             } else {
@@ -362,8 +353,7 @@
         } catch(e) {
             chatContainer.innerHTML = '<div class="empty-state"><p>⚠️ 加载失败</p></div>';
         }
-        loadConvList();
-        saveChatHistory();
+        loadConvList(); saveChatHistory();
     }
 
     async function deleteConv(id) {
@@ -377,8 +367,6 @@
 
     function toggleSidebar() {
         document.getElementById('sidebar').classList.toggle('open');
-    }
-
     }
 
     // ============================================
@@ -777,6 +765,10 @@
     applyTheme(getTheme());
 
 
+    let _allCollections = [];
+    let _selectedTextbooks = new Set();
+    let _selectedExams = new Set();
+
     // ============================================
     // Tab 切换
     // ============================================
@@ -796,10 +788,6 @@
             refreshManagePanel();
         }
     }
-
-    let _allCollections = [];
-    let _selectedTextbooks = new Set();
-    let _selectedExams = new Set();
 
     async function refreshManagePanel() {
         await loadCollectionsForManage();

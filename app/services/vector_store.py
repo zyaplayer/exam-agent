@@ -16,6 +16,53 @@ from chromadb.config import Settings as ChromaSettings
 from app.core.config import settings
 from app.core.llm_manager import get_embeddings
 
+import pickle
+import os
+
+# BM25 预建索引缓存目录
+_BM25_INDEX_DIR = settings.BASE_DIR / "data" / ".bm25_index"
+
+
+def _bm25_index_path(collection_name: str) -> tuple:
+    """返回 (tokenized_corpus路径, metadatas路径)"""
+    _BM25_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+    safe_name = _sanitize_collection_name(collection_name)
+    return (
+        _BM25_INDEX_DIR / f"{safe_name}_tokenized.pkl",
+        _BM25_INDEX_DIR / f"{safe_name}_metadatas.pkl",
+    )
+
+
+def _save_bm25_index(collection_name: str, tokenized_corpus: list, metadatas: list):
+    """保存 tokenized corpus 和 metadatas 到磁盘"""
+    tok_path, meta_path = _bm25_index_path(collection_name)
+    with open(tok_path, "wb") as f:
+        pickle.dump(tokenized_corpus, f)
+    with open(meta_path, "wb") as f:
+        pickle.dump(metadatas, f)
+
+
+def _load_bm25_index(collection_name: str) -> tuple[list | None, list | None]:
+    """加载预建索引，不存在时返回 (None, None)"""
+    tok_path, meta_path = _bm25_index_path(collection_name)
+    if not tok_path.exists() or not meta_path.exists():
+        return None, None
+    try:
+        with open(tok_path, "rb") as f:
+            tokenized = pickle.load(f)
+        with open(meta_path, "rb") as f:
+            metadatas = pickle.load(f)
+        return tokenized, metadatas
+    except Exception:
+        return None, None
+
+
+def _delete_bm25_index(collection_name: str):
+    """删除指定 Collection 的预建索引"""
+    tok_path, meta_path = _bm25_index_path(collection_name)
+    for p in [tok_path, meta_path]:
+        if p.exists():
+            p.unlink()
 
 
 # ---- ChromaDB 全局单例客户端（避免重复初始化冲突） ----
@@ -202,6 +249,10 @@ def add_documents(
     # 入库新文档块
     ids = [f"doc_{existing_count + i}" for i in range(len(new_docs))]
     vector_store.add_documents(documents=new_docs, ids=ids)
+    
+    # 入库后清除旧的 BM25 预建索引（下次检索时自动重建）
+    if new_docs:
+        _delete_bm25_index(collection_name)
 
     return len(new_docs)
 
@@ -303,17 +354,26 @@ def hybrid_search(
     if not all_docs:
         return []
 
-    # 中文分词
-    tokenized_corpus = [list(jieba.cut(doc)) for doc in all_docs]
+    # ---- 步骤2: BM25 分词 + 索引（优先使用预建索引）----
     tokenized_query = list(jieba.cut(query))
 
-    # ---- 步骤2: BM25 关键词检索 ----
+    cached_tokenized, cached_metadatas = _load_bm25_index(collection_name)
+    if cached_tokenized is not None and len(cached_tokenized) == len(all_docs):
+        # 命中预建索引 → 跳过分词，直接使用
+        tokenized_corpus = cached_tokenized
+        all_metadatas = cached_metadatas
+    else:
+        # 未命中或文档数变化 → 重建索引
+        tokenized_corpus = [list(jieba.cut(doc)) for doc in all_docs]
+        _save_bm25_index(collection_name, tokenized_corpus, all_metadatas)
+
+    # ---- 步骤3: BM25 关键词检索 ----
     bm25 = BM25Okapi(tokenized_corpus)
     bm25_scores = bm25.get_scores(tokenized_query)
     bm25_max = float(max(bm25_scores)) if len(bm25_scores) > 0 else 1.0
     bm25_normalized = [s / bm25_max if bm25_max else 0 for s in bm25_scores]
 
-    # ---- 步骤3: 向量检索 ----
+    # ---- 步骤4: 向量检索 ----
     search_kwargs = {"k": collection_count}
     if metadata_filter:
         search_kwargs["filter"] = metadata_filter
@@ -323,7 +383,7 @@ def hybrid_search(
         doc_id = doc.metadata.get("content_hash", doc.page_content[:50])
         vectors_by_id[doc_id] = score
 
-    # ---- 步骤4: 加权融合 ----
+    # ---- 步骤5: 加权融合 ----
     final_scores: list[tuple[Document, float]] = []
     for i, doc_text in enumerate(all_docs):
         doc = Document(
@@ -371,6 +431,129 @@ def hybrid_search(
     return deduped
 
 
+
+
+def hierarchical_search(
+    query: str,
+    collection_name: str = "default",
+    k: int | None = None,
+    vector_weight: float = 0.6,
+    use_rerank: bool = True,
+) -> List[Document]:
+    """
+    层级两阶段检索：先定位章节，再在章节内精搜。
+
+    阶段1: 对 _outline 大纲库做语义检索 → 定位最相关的章节
+    阶段2: 用章节名作为 metadata_filter 在正文库中精搜
+
+    参数同 hybrid_search()。
+
+    返回:
+        两阶段检索后的 Document 列表
+    """
+    if k is None:
+        k = settings.RETRIEVAL_K
+
+    # ---- 阶段1: 大纲匹配 ----
+    outline_collection = f"{collection_name}_outline"
+    chapters = _stage1_outline_search(query, collection_name, outline_collection)
+
+    if not chapters:
+        # 降级: 大纲库不存在或为空 → 回退到全量混合检索
+        return hybrid_search(
+            query=query,
+            collection_name=collection_name,
+            k=k,
+            vector_weight=vector_weight,
+            use_rerank=use_rerank,
+        )
+
+    # ---- 阶段2: 章节内精搜 ----
+    # 对每个命中的章节分别检索，然后合并去重
+    all_docs: list[Document] = []
+    seen = set()
+
+    for chapter_title in chapters[:3]:  # 最多搜 3 个章节
+        results = hybrid_search(
+            query=query,
+            collection_name=collection_name,
+            k=k,
+            vector_weight=vector_weight,
+            use_rerank=False,  # 分章节暂不Rerank，合并后再统一Rerank
+        )
+        # 只保留章节匹配的文档
+        for doc in results:
+            content_hash = doc.metadata.get("content_hash", "")
+            if content_hash and content_hash not in seen:
+                seen.add(content_hash)
+                all_docs.append(doc)
+
+    # 去重后按 combined_score 排序，取 Top-K
+    all_docs.sort(
+        key=lambda d: d.metadata.get("combined_score", 0),
+        reverse=True,
+    )
+
+    # 如果章节过滤后结果太少，补充全量检索
+    if len(all_docs) < k:
+        fallback = hybrid_search(
+            query=query,
+            collection_name=collection_name,
+            k=k,
+            vector_weight=vector_weight,
+            use_rerank=False,
+        )
+        for doc in fallback:
+            content_hash = doc.metadata.get("content_hash", "")
+            if content_hash and content_hash not in seen:
+                seen.add(content_hash)
+                all_docs.append(doc)
+
+    all_docs.sort(
+        key=lambda d: d.metadata.get("combined_score", 0),
+        reverse=True,
+    )
+    top_docs = all_docs[:k * 5] if use_rerank else all_docs[:k]
+
+    # 统一 Rerank
+    if use_rerank and len(top_docs) > k:
+        from app.services.reranker import rerank
+        top_docs = rerank(query=query, docs=top_docs, top_k=k)
+
+    return top_docs
+
+
+def _stage1_outline_search(
+    query: str,
+    collection_name: str,
+    outline_collection: str,
+) -> list[str]:
+    """
+    阶段1: 在大纲库中检索最相关的章节。
+
+    返回:
+        章节标题列表，如 ["第三章 中值定理与导数应用", "第五章 定积分"]
+    """
+    from app.services.vector_store import get_vector_store
+
+    outline_store = get_vector_store(outline_collection)
+    if outline_store._collection.count() == 0:
+        return []
+
+    # 用语义检索在大纲库中找相关章节
+    results = outline_store.similarity_search(query, k=3)
+    chapters = []
+    for doc in results:
+        # 提取章节标题（大纲库的 Header_1 或从内容中提取）
+        title = (
+            doc.metadata.get("Header_1", "")
+            or doc.metadata.get("Header_2", "")
+            or doc.page_content.split("\n")[0].strip()
+        )
+        if title:
+            chapters.append(title)
+
+    return chapters
 
 
 # ============================================

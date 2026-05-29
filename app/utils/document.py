@@ -105,18 +105,24 @@ def load_document(file_path: str) -> List[Document]:
         return docs
 
     elif suffix == ".docx":
-        # [注] 需要安装 python-docx: pip install python-docx
         try:
-            from langchain_community.document_loaders import Docx2txtLoader
-            loader = Docx2txtLoader(str(path))
-            docs = loader.load()
-            for doc in docs:
-                doc.metadata["source"] = str(path)
+            import docx
+            doc = docx.Document(str(path))
+            full_text = "\n".join([para.text for para in doc.paragraphs if para.text.strip()])
+            if not full_text.strip():
+                raise RuntimeError("文档为空或仅含图片")
+            docs = [
+                Document(
+                    page_content=full_text,
+                    metadata={"source": str(path)},
+                )
+            ]
             return docs
         except ImportError:
             raise ImportError(
                 "处理 .docx 文件需要安装 python-docx，请运行: pip install python-docx"
             )
+
 
     else:
         raise ValueError(

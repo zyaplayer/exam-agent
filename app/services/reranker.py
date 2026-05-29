@@ -9,12 +9,10 @@ from sentence_transformers import CrossEncoder
 from langchain_core.documents import Document
 
 _RERANKER_INSTANCE: CrossEncoder | None = None
-_MODEL_NAME = "BAAI/bge-reranker-v2-m3"
-# [注] 如果显存不足可换为 "BAAI/bge-reranker-v2-minicpm-layerwise"（更快更轻）
+_MODEL_NAME = "BAAI/bge-reranker-base"  # ~300MB，更轻更快，中文效果也很好
 
 
 def _get_reranker() -> CrossEncoder:
-    """全局单例，懒加载 Reranker 模型（约 1.5GB，首次加载 10-30 秒）"""
     global _RERANKER_INSTANCE
     if _RERANKER_INSTANCE is None:
         print(f"[Reranker] 正在加载 {_MODEL_NAME} ...")
@@ -48,8 +46,12 @@ def rerank(
     if not docs:
         return docs
 
-    model = _get_reranker()
-    # 构建 (query, doc_text) 对
+    try:
+        model = _get_reranker()
+    except Exception as e:
+        print(f"[Reranker] 模型加载失败，跳过精排: {e}")
+        return docs[:top_k]
+
     pairs = [(query, doc.page_content) for doc in docs]
     scores = model.predict(pairs)
 
