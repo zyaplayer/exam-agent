@@ -4,8 +4,9 @@
 启动 API 服务，挂载路由、CORS 中间件、静态文件服务。
 """
 import os
-os.environ["HF_ENDPOINT"] = os.environ.get("HF_ENDPOINT", "https://hf-mirror.com")
 
+# HF_ENDPOINT 已在 app/__init__.py 中通过 setdefault 设置
+# PYTHONUTF8 须在 Python 解释器启动前设置，无法在代码中控制，请使用 start.ps1 启动
 
 from contextlib import asynccontextmanager
 from pathlib import Path

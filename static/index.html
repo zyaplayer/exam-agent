@@ -887,7 +887,10 @@
             const res = await fetch('/api/documents/upload', {method: 'POST', body: formData});
             if (!res.ok) throw new Error((await res.json()).detail);
             const data = await res.json();
-            document.getElementById('uploadMsg').textContent = `✅ ${data.filename} → ${data.collection_name}，${data.chunk_count} 块`;
+            const msg = data.chunk_count === 0
+                ? `ℹ️ ${data.filename} → ${data.collection_name}，${data.message || '0 块（可能已存在）'}`
+                : `✅ ${data.filename} → ${data.collection_name}，${data.chunk_count} 块`;
+            document.getElementById('uploadMsg').textContent = msg;
             fileInput.value = '';
             loadCollectionsForManage();
             loadCollections();

@@ -267,6 +267,15 @@ async def upload_document(
 ):
     """上传文档 → 解析 → 切分 → 向量化 → 入库"""
     filename = file.filename or "unknown"
+
+    # 校验：禁止直接上传到内部 _outline 索引库
+    if collection_name.endswith("_outline"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"'{collection_name}' 是系统自动维护的大纲索引库，"
+                   f"不能作为上传目标。请选择正文知识库（如 'default'）。",
+        )
+
     suffix = Path(filename).suffix.lower()
     allowed = {".pdf", ".markdown", ".txt", ".docx"}
     if suffix not in allowed:
@@ -363,12 +372,14 @@ async def upload_document(
     response_model=CollectionListResponse,
 )
 async def get_collections():
-    """返回 ChromaDB 中所有 Collection 名称"""
+    """返回 ChromaDB 中所有 Collection 名称（自动隐藏内部 _outline 索引库）"""
     try:
         cols = list_collections()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
 
+    # 二次过滤：确保 _outline 内部索引库不会暴露给前端
+    cols = [c for c in cols if not c.endswith("_outline")]
     return CollectionListResponse(collections=cols, count=len(cols))
 
 

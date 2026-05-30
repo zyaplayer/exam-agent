@@ -582,6 +582,8 @@ def list_collections() -> List[str]:
             pass
 
     display_names = [reverse_aliases.get(name, name) for name in safe_names]
+    # 过滤掉内部索引库（如 default_outline），这些不应暴露给用户
+    display_names = [n for n in display_names if not n.endswith("_outline")]
     return display_names
 
 
