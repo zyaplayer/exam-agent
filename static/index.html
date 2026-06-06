@@ -162,6 +162,9 @@
         .manage-section input:focus { border-color: var(--primary-light); }
         .manage-section button { background: var(--primary); color: #fff; border: none; border-radius: 8px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
         .manage-section button:hover { background: var(--primary-light); }
+        .manage-section button:disabled { background: #94a3b8; cursor: wait; }
+        .uploading { animation: pulse 1.2s ease-in-out infinite; color: var(--primary); font-weight: 500; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         .binding-card { background: var(--bg); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
         .binding-card .del-btn { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
 
@@ -899,6 +902,15 @@
         const fileInput = document.getElementById('uploadFile');
         const file = fileInput.files[0];
         if (!file) { document.getElementById('uploadMsg').textContent = '请先选择文件'; return; }
+
+        const uploadBtn = document.querySelector('#managePanel button[onclick="uploadDocument()"]');
+        const msgEl = document.getElementById('uploadMsg');
+
+        // 进入加载态
+        uploadBtn.disabled = true;
+        uploadBtn.textContent = '⏳ 上传入库中...';
+        msgEl.innerHTML = '<span class="uploading">正在解析文档并向量化入库，请稍候...</span>';
+
         const formData = new FormData();
         formData.append('file', file);
         formData.append('collection_name', document.getElementById('uploadCollection').value);
@@ -909,11 +921,15 @@
             const msg = data.chunk_count === 0
                 ? `ℹ️ ${data.filename} → ${data.collection_name}，${data.message || '0 块（可能已存在）'}`
                 : `✅ ${data.filename} → ${data.collection_name}，${data.chunk_count} 块`;
-            document.getElementById('uploadMsg').textContent = msg;
+            msgEl.textContent = msg;
             fileInput.value = '';
             loadCollectionsForManage();
             loadCollections();
-        } catch(e) { document.getElementById('uploadMsg').textContent = '❌ ' + e.message; }
+        } catch(e) { msgEl.textContent = '❌ ' + e.message; }
+        finally {
+            uploadBtn.disabled = false;
+            uploadBtn.textContent = '上传入库';
+        }
     }
     </script>
 </body>
