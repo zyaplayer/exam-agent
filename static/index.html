@@ -234,7 +234,8 @@
                     <h3>📤 上传文档</h3>
                     <input type="file" id="uploadFile" accept=".pdf,.markdown,.txt,.docx" />
                     <select id="uploadCollection" style="margin-left:8px;"></select>
-                    <button onclick="uploadDocument()" style="margin-left:8px;">上传入库</button>
+                    <button onclick="createNewCollection()" style="margin-left:4px;background:#22c55e;color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:14px;cursor:pointer;" title="新建知识库">+ 新建</button>
+                    <button onclick="uploadDocument()" style="margin-left:4px;">上传入库</button>
                     <span id="uploadMsg" style="font-size:12px;color:var(--text-muted);margin-left:8px;"></span>
                 </div>
             </div>
@@ -874,6 +875,24 @@
             sel.innerHTML = (data.collections.length ? data.collections : ['default'])
                 .map(n => `<option value="${n}">${n}</option>`).join('');
         } catch(e) {}
+    }
+
+    function createNewCollection() {
+        const name = prompt('请输入新知识库名称（如：高数笔记、线性代数）：');
+        if (!name || !name.trim()) return;
+        const trimmed = name.trim();
+        const sel = document.getElementById('uploadCollection');
+        // 检查是否已存在
+        for (const opt of sel.options) {
+            if (opt.value === trimmed) { sel.value = trimmed; return; }
+        }
+        // 新建选项并选中
+        const opt = document.createElement('option');
+        opt.value = trimmed;
+        opt.textContent = trimmed;
+        sel.appendChild(opt);
+        sel.value = trimmed;
+        document.getElementById('uploadMsg').textContent = `📌 已切换到"${trimmed}"，上传文件即可创建该知识库`;
     }
 
     async function uploadDocument() {
