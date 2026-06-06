@@ -588,9 +588,58 @@ def list_collections() -> List[str]:
 
 
 
+def get_collection_info(collection_name: str) -> dict:
+    """
+    获取知识库详情：包含哪些文件、每个文件的块数、总块数。
+
+    返回:
+        {
+            "name": "default",
+            "total_chunks": 525,
+            "files": [
+                {"source": "xxx/2025王道数据结构.docx", "chunks": 500, "pages": 200},
+                ...
+            ]
+        }
+    """
+    collection_name = _sanitize_collection_name(collection_name)
+    vs = get_vector_store(collection_name)
+    count = vs._collection.count()
+    if count == 0:
+        return {"name": collection_name, "total_chunks": 0, "files": []}
+
+    data = vs._collection.get(include=["metadatas"])
+    metadatas = data.get("metadatas") or []
+
+    from pathlib import Path
+    from collections import defaultdict
+    files_dict = defaultdict(lambda: {"chunks": 0, "pages": set()})
+    for m in metadatas:
+        if not m:
+            continue
+        src = m.get("source", "未知来源")
+        fname = Path(src).name
+        files_dict[fname]["chunks"] += 1
+        if m.get("page"):
+            files_dict[fname]["pages"].add(m["page"])
+
+    files = []
+    for fname, info in sorted(files_dict.items()):
+        entry = {"filename": fname, "chunks": info["chunks"]}
+        if info["pages"]:
+            entry["pages"] = sorted(info["pages"])
+        files.append(entry)
+
+    return {
+        "name": collection_name,
+        "total_chunks": count,
+        "files": files,
+    }
+
+
 def delete_collection(collection_name: str) -> bool:
     """
-    删除指定的 Collection。
+    删除指定的 Collection，同时清理别名映射和 BM25 缓存。
 
     参数:
         collection_name: 要删除的 Collection 名称
@@ -598,14 +647,29 @@ def delete_collection(collection_name: str) -> bool:
     返回:
         是否成功删除
     """
+    import json
 
     collection_name = _sanitize_collection_name(collection_name)
     client = _get_persistent_client()
 
-
     try:
         client.delete_collection(collection_name)
-        # 同时清空缓存中的 embedding 引用（如果有的话）
+        # 清理别名映射
+        if _ALIASES_FILE.exists():
+            try:
+                aliases = json.loads(_ALIASES_FILE.read_text(encoding="utf-8"))
+                # 找到并删除该 safe_name 对应的中文名
+                to_remove = [k for k, v in aliases.items() if v == collection_name]
+                for k in to_remove:
+                    del aliases[k]
+                _ALIASES_FILE.write_text(
+                    json.dumps(aliases, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+            except Exception:
+                pass
+        # 清理 BM25 缓存
+        _delete_bm25_index(collection_name)
         return True
     except Exception:
         return False

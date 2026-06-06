@@ -26,7 +26,7 @@ from app.agent.quiz_generator import (
     delete_binding,
 )
 from app.agent.planner_chain import generate_plan_stream
-from app.services.vector_store import ingest_document, list_collections
+from app.services.vector_store import ingest_document, list_collections, get_collection_info, delete_collection
 from app.services.conversation_service import (
     new_conversation_id,
     append_message,
@@ -381,6 +381,37 @@ async def get_collections():
     # 二次过滤：确保 _outline 内部索引库不会暴露给前端
     cols = [c for c in cols if not c.endswith("_outline")]
     return CollectionListResponse(collections=cols, count=len(cols))
+
+
+@router.get(
+    "/api/documents/{collection_name}",
+    summary="查看知识库详情",
+)
+async def get_collection_detail(collection_name: str):
+    """返回知识库中包含的文件列表及每个文件的块数"""
+    if collection_name.endswith("_outline"):
+        raise HTTPException(status_code=404, detail="内部索引库不可直接访问")
+    try:
+        info = get_collection_info(collection_name)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return info
+
+
+@router.delete(
+    "/api/documents/{collection_name}",
+    summary="删除知识库",
+)
+async def remove_collection(collection_name: str):
+    """删除指定知识库及其全部内容"""
+    if collection_name.endswith("_outline"):
+        raise HTTPException(status_code=400, detail="内部索引库不可直接删除")
+    # 同时删除对应的大纲索引库
+    deleted = delete_collection(collection_name)
+    delete_collection(f"{collection_name}_outline")  # 尝试清理大纲，失败也不报错
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"知识库 '{collection_name}' 不存在")
+    return {"message": f"知识库 '{collection_name}' 已删除", "collection_name": collection_name}
 
 
 # ============================================

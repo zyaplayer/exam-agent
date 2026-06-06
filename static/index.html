@@ -167,6 +167,20 @@
         @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
         .binding-card { background: var(--bg); border-radius: 8px; padding: 10px 14px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
         .binding-card .del-btn { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+        /* 知识库管理卡片 */
+        .col-card { background: var(--bg); border-radius: 8px; margin-bottom: 6px; overflow: hidden; }
+        .col-card-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; cursor: pointer; font-size: 13px; user-select: none; transition: background 0.15s; }
+        .col-card-header:hover { background: var(--border); }
+        .col-card-header .col-name { font-weight: 600; flex: 1; }
+        .col-card-header .col-stats { color: var(--text-muted); font-size: 12px; margin-right: 12px; }
+        .col-card-header .col-arrow { transition: transform 0.2s; font-size: 10px; color: var(--text-muted); }
+        .col-card-header.open .col-arrow { transform: rotate(90deg); }
+        .col-card-detail { display: none; padding: 0 14px 12px; font-size: 12px; }
+        .col-card-detail.show { display: block; }
+        .col-card-detail .file-row { padding: 4px 0; color: var(--text-muted); border-bottom: 1px dotted var(--border); }
+        .col-card-detail .file-row:last-child { border-bottom: none; }
+        .col-card-detail .danger-btn { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; border-radius: 6px; padding: 4px 12px; font-size: 12px; cursor: pointer; margin-top: 8px; }
+        .col-card-detail .danger-btn:hover { background: #fee2e2; }
 
         /* 移动端适配 */
         @media (max-width: 640px) {
@@ -219,6 +233,10 @@
             </div>
 
             <div class="panel" id="managePanel">
+                <div class="manage-section">
+                    <h3>📚 知识库列表</h3>
+                    <div id="collectionList" style="font-size:13px;color:var(--text-muted);">加载中...</div>
+                </div>
                 <div class="manage-section">
                     <h3>📎 创建教材-试卷绑定</h3>
                     <p style="font-size:13px;color:var(--text-muted);margin-bottom:8px;">教材 Collection：</p>
@@ -794,9 +812,67 @@
     }
 
     async function refreshManagePanel() {
+        await loadCollectionList();
         await loadCollectionsForManage();
         await loadBindings();
         await loadUploadCollectionOptions();
+    }
+
+    async function loadCollectionList() {
+        const container = document.getElementById('collectionList');
+        try {
+            const res = await fetch('/api/documents');
+            const data = await res.json();
+            if (!data.collections.length) {
+                container.innerHTML = '<span style="color:var(--text-muted);">暂无知识库，请上传文档创建</span>';
+                return;
+            }
+            // 逐一获取每个知识库的详情
+            let html = '';
+            for (const name of data.collections) {
+                try {
+                    const detailRes = await fetch(`/api/documents/${encodeURIComponent(name)}`);
+                    const detail = await detailRes.json();
+                    const fileRows = (detail.files || []).map(f => {
+                        const pages = f.pages ? `，${f.pages.length} 页` : '';
+                        return `<div class="file-row">📄 ${f.filename} — ${f.chunks} 块${pages}</div>`;
+                    }).join('');
+                    html += `
+                        <div class="col-card">
+                            <div class="col-card-header" onclick="toggleColDetail('${name}')">
+                                <span class="col-name">📁 ${name}</span>
+                                <span class="col-stats">${detail.total_chunks} 块 · ${detail.files.length} 个文件</span>
+                                <span class="col-arrow" id="arrow_${name}">▶</span>
+                            </div>
+                            <div class="col-card-detail" id="colDetail_${name}">
+                                ${fileRows || '<div class="file-row" style="color:var(--text-muted);">（空知识库）</div>'}
+                                <button class="danger-btn" onclick="event.stopPropagation();deleteCollection('${name}')">🗑 删除知识库</button>
+                            </div>
+                        </div>`;
+                } catch(e) { /* skip failed detail fetch */ }
+            }
+            container.innerHTML = html;
+        } catch(e) { container.innerHTML = '<span style="color:#dc2626;">加载失败</span>'; }
+    }
+
+    function toggleColDetail(name) {
+        const detail = document.getElementById('colDetail_' + name);
+        const arrow = document.getElementById('arrow_' + name);
+        if (!detail || !arrow) return;
+        const isOpen = detail.classList.toggle('show');
+        arrow.textContent = isOpen ? '▼' : '▶';
+    }
+
+    async function deleteCollection(name) {
+        if (!confirm(`确定删除知识库"${name}"及其全部内容吗？此操作不可恢复。`)) return;
+        try {
+            const res = await fetch(`/api/documents/${encodeURIComponent(name)}`, {method: 'DELETE'});
+            if (!res.ok) throw new Error((await res.json()).detail);
+            loadCollectionList();
+            loadCollectionsForManage();
+            loadUploadCollectionOptions();
+            loadCollections();
+        } catch(e) { alert('删除失败: ' + e.message); }
     }
 
     async function loadCollectionsForManage() {
@@ -923,6 +999,7 @@
                 : `✅ ${data.filename} → ${data.collection_name}，${data.chunk_count} 块`;
             msgEl.textContent = msg;
             fileInput.value = '';
+            loadCollectionList();
             loadCollectionsForManage();
             loadCollections();
         } catch(e) { msgEl.textContent = '❌ ' + e.message; }
