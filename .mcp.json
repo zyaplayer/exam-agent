@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "sequential-thinking": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-sequential-thinking"]
+    },
+    "browser": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-server-browser"]
+    }
+  }
+}

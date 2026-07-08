@@ -207,8 +207,7 @@ def add_documents(
         实际入库的文档数量
 
     注意:
-        如果同名文档已存在，当前版本不做去重，会产生冗余向量。
-        [后续扩展] 入库前先查重（按 source + page 或文本哈希判断）。
+        已通过 SHA256 哈希实现 chunk 级去重，但文件级去重暂未实现。
     """
     if not docs:
         return 0
@@ -711,22 +710,3 @@ def ingest_document(
     count = add_documents(chunks, collection_name)
 
     return count
-
-
-# ============================================
-# ============================================
-# 当前代码缺陷总结（更新于 2026-05-15）
-# ============================================
-#
-# ✅ 已修复:
-#   1. 连接单例 — _get_persistent_client() 全局共享
-#   2. 去重 — SHA256 哈希过滤
-#   3. 分数过滤 — similarity_search_with_score + RETRIEVAL_THRESHOLD
-#   4. 数据校验 — routes.py 100MB 限制
-#   7. 中文名称 — _sanitize_collection_name()
-#
-# ⬜ 待修复:
-#   1. Embedding Provider 目前仅支持 BGE 本地模型，未支持切换
-#   2. 大批量入库无批处理优化
-#   3. 不支持按 source 删除/更新单个文档
-#   4. 混合检索对小 Collection（<100个文档）的 BM25 有效，大量文档时需要性能优化

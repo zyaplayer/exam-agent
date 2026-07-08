@@ -6,7 +6,6 @@
 import os
 
 # HF_ENDPOINT 已在 app/__init__.py 中通过 setdefault 设置
-# PYTHONUTF8 须在 Python 解释器启动前设置，无法在代码中控制，请使用 start.ps1 启动
 
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -84,8 +83,6 @@ app = FastAPI(
     version=settings.PROJECT_VERSION,
     description="以考研为导向的智能体后端，支持 RAG 知识问答、做题练习与学习规划。",
     lifespan=lifespan,
-    # [缺陷] docs_url 和 redoc_url 使用默认值，生产环境建议关闭或加鉴权。
-    # [后续扩展] 生产环境设置 docs_url=None 关闭 Swagger UI。
 )
 
 # ============================================
@@ -94,8 +91,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # 开发阶段允许所有来源
-    # [后续扩展] 生产环境改为白名单: allow_origins=["https://yourdomain.com"]
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -141,6 +137,4 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
-        # reload=True 表示代码变更时自动重启（仅开发环境）
-        # [后续扩展] 生产环境用 gunicorn + uvicorn workers，而非单进程 uvicorn。
     )

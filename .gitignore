@@ -53,3 +53,6 @@ test.py
 
 # Word 临时文件
 ~$*.docx
+
+# 临时笔记（可能含敏感信息）
+text.txt

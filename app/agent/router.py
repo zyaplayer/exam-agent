@@ -187,10 +187,14 @@ def _should_upgrade_to_llm(result: RouteResult) -> bool:
 # 第2层: LLM 语义分类
 # ============================================
 
-def _llm_classify(message: str) -> RouteResult:
+def _llm_classify(message: str, fallback_result: RouteResult | None = None) -> RouteResult:
     """
     使用 LLM 进行语义级别的意图分类。
     在规则引擎不确定时调用。
+
+    参数:
+        message:         用户消息
+        fallback_result: 规则引擎的分类结果，LLM 失败时返回此结果
     """
     llm = get_llm(provider="deepseek", temperature=0.0, streaming=False)
 
@@ -211,12 +215,14 @@ def _llm_classify(message: str) -> RouteResult:
                 return RouteResult(
                     intent=intent,
                     chain_name=_intent_to_chain(intent),
-                    confidence=0.75,  # LLM 分类的默认置信度
+                    confidence=0.75,
                     matched_keywords=[],
                     router_layer="llm",
                 )
 
-        # LLM 输出不匹配任何标签 → 兜底
+        # LLM 输出不匹配任何标签 → 退回规则引擎结果
+        if fallback_result is not None:
+            return fallback_result
         return RouteResult(
             intent=_DEFAULT_INTENT,
             chain_name=_intent_to_chain(_DEFAULT_INTENT),
@@ -227,7 +233,8 @@ def _llm_classify(message: str) -> RouteResult:
 
     except Exception:
         # LLM 调用失败 → 退回使用规则引擎的结果
-        # [缺陷] 此处丢失了规则引擎的原始结果。调用方应传入 fallback 结果。
+        if fallback_result is not None:
+            return fallback_result
         return RouteResult(
             intent=_DEFAULT_INTENT,
             chain_name=_intent_to_chain(_DEFAULT_INTENT),
@@ -266,7 +273,7 @@ def classify_intent(message: str) -> RouteResult:
     # 判断是否需要升级
     if _should_upgrade_to_llm(rule_result):
         # 第2层: LLM 语义分类
-        llm_result = _llm_classify(message)
+        llm_result = _llm_classify(message, fallback_result=rule_result)
         return llm_result
 
     return rule_result
@@ -297,28 +304,3 @@ def _intent_to_chain(intent: Intent) -> str:
         Intent.PLANNER: "planner_chain",
     }
     return mapping[intent]
-
-
-# ============================================
-# 已知缺陷汇总
-# ============================================
-#
-# 1. 【关键词列表不可热更新】
-#    - 修改关键词需要改代码、重启服务。
-#    - 后续可将关键词列表移到配置文件或数据库中，支持热更新。
-#
-# 2. 【学科关键词不完整】
-#    - 仅覆盖数学/英语/政治的高频词，缺少专业课关键词。
-#    - 后续从考研大纲提取完整关键词表。
-#
-# 3. 【LLM 分类异常时丢失原始规则结果】
-#    - _llm_classify 异常时返回兜底结果，未保留规则引擎的原始判断。
-#    - 后续应改为传入 fallback_result 参数。
-#
-# 4. 【无上下文感知】
-#    - 没有利用对话历史判断意图。
-#    - 后续 classify_intent 应接受 conversation_history 参数。
-#
-# 5. 【LLM 输出格式不稳定】
-#    - 某些模型可能在 "qa" 前后加空格或换行。
-#    - 当前做了 contains 检查，但可能匹配不精确。

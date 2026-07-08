@@ -276,23 +276,3 @@ async def ask_question_stream(
         else:
             yield f"⚠️ AI 服务暂时不可用，请稍后重试。（{error_msg[:60]}）"
 
-
-    # [缺陷] 流式结束后没有额外处理（如保存对话记录到日志/数据库）。
-    # [后续扩展] 在 finally 块中记录完整问答到对话历史。
-
-
-# ============================================
-# ============================================
-# 已知缺陷汇总（更新于 2026-05-15）
-# ============================================
-#
-# ✅ 已修复:
-#   2. 对话历史 — conversation_service + format_history_for_prompt
-#   3. Token截断 — token_counter.check_and_truncate
-#   4. 检索过滤 — similarity_search_with_score + RETRIEVAL_THRESHOLD
-#   6. 异常处理 — 7处 try/except
-#   7. 引用标注 — Prompt 强制要求 [编号]
-#
-# ⬜ 待修复:
-#   1. 检索与生成耦合 — 后续抽取 RetrievalPipeline 类
-#   5. Collection 管理 — 不支持跨 Collection 混合检索

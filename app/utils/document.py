@@ -50,10 +50,6 @@ def _looks_like_front_matter(text: str) -> bool:
     return any(p in head for p in FRONT_MATTER_PATTERNS)
 
 
-
-
-
-
 # ============================================
 # 第一部分：文档加载
 # ============================================
@@ -127,8 +123,7 @@ def load_document(file_path: str) -> List[Document]:
     else:
         raise ValueError(
             f"不支持的文件格式: '{suffix}'。"
-            f"当前支持: .pdf, .markdown, .txt"
-            # [TODO: 后续可扩展 .docx（python-docx）、.html 等格式]
+            f"当前支持: .pdf, .markdown, .txt, .docx"
         )
 
 
@@ -266,8 +261,6 @@ def split_by_markdown_headers(docs: List[Document]) -> List[Document]:
                         )
                     )
 
-    # [缺陷] 没有做去重，同一段落出现在不同位置时会产生冗余块。
-    # [后续扩展] 可加入基于文本哈希的去重逻辑。
     return final_docs
 
 
@@ -305,31 +298,3 @@ def process_document(file_path: str) -> List[Document]:
     return split_by_markdown_headers(docs)
 
 
-
-# ============================================
-# 当前代码缺陷总结 (2025-05-09)
-# ============================================
-#
-# 1. 【PDF 解析能力弱】
-#    - 仅支持文本层 PDF，无法处理扫描版（需要 OCR）。
-#    - 无法提取表格、公式、图片，考研数学/理工科资料会丢失核心内容。
-#    - 后续拆分方向：新增 document_parser.py 专门做 PDF -> Markdown，
-#      集成 Marker / Nougat / Mathpix OCR 等高质量转换工具。
-#
-# 2. 【Markdown 标题切分依赖文档自身结构】
-#    - 纯 TXT 或结构混乱的 PDF 没有标题层级，会直接退化为字符切分，
-#      丢失语义边界。
-#    - 后续拆分方向：text_splitter.py 独立出来，增加更多切分策略
-#      （按语义段落、按题型、按知识点标签等）。
-#
-# 3. 【无去重机制】
-#    - 同一份文档多次处理会产生重复向量块，浪费存储和检索精度。
-#    - 后续可加入基于 SHA256 哈希的去重。
-#
-# 4. 【元数据不完整】
-#    - 当前仅记录 source 和 page，缺少科目、年份、章节等标签，
-#      导致后续无法按维度过滤检索。
-#    - 后续 ingest_document 应接受 metadata 参数注入。
-#
-# 5. 【未支持 .docx / .html 等常见格式】
-#    - 后续可在 load_document 中新增对应加载器。

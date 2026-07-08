@@ -483,32 +483,3 @@ async def quick_consult_stream(
     async for chunk in llm.astream(messages):
         if chunk.content:
             yield chunk.content
-
-
-# ============================================
-# 已知缺陷汇总
-# ============================================
-#
-# 1. 【书目盘点缺少 chunk 统计】
-#    - scan_available_subjects 不返回每个 Collection 的具体文档量。
-#    - 导致计划无法区分"有大量资料"和"只有空壳"的科目。
-#
-# 2. 【大纲文件匹配靠文件名精确匹配】
-#    - 当前按 Collection 名匹配同名大纲文件，没有模糊匹配或别名。
-#    - 后续应支持别名映射或通过 bindings.json 关联。
-#
-# 3. 【信息提取 LLM JSON 遵从度不稳定】
-#    - DeepSeek 模型可能输出非纯 JSON（包裹在 ```json 代码块中）。
-#    - 当前有正则提取 + 字段补全兜底，但不能保证所有字段正确。
-#
-# 4. 【学习卡片不持久化】
-#    - 生成后不保存，刷新即丢失。
-#    - 后续可存入 ChromaDB 专用 Collection，支持"我的学习卡片"管理。
-#
-# 5. 【快速咨询与 qa_chain 存在功能重叠】
-#    - quick_consult_stream 和 qa_chain.ask_question_stream 逻辑高度相似。
-#    - 后续应抽取公共基类，两个函数作为参数化的变体。
-#
-# 6. 【无多科目联合规划】
-#    - 当前一次规划一个科目，无法同时为"高数+英语+政治"生成交叉计划。
-#    - 后续应支持多科目时间片分配策略。
