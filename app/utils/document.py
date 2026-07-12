@@ -224,8 +224,6 @@ def split_by_markdown_headers(docs: List[Document]) -> List[Document]:
                         metadata={**doc.metadata, "split_method": "raw"},
                     )
                 ]
-
-
         # 步骤4: 对每个块做长度检查，超长再切
         for chunk_doc in header_chunks:
             chunk_text = chunk_doc.page_content.strip()

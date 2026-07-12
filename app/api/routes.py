@@ -5,8 +5,6 @@
 /chat 接口接入三条真实链路: QA / Quiz / Planner。
 """
 
-import os
-import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
